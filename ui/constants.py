@@ -1,0 +1,6 @@
+# Shared UI constants
+INDENT_W = 16
+GUTTER_W = 12
+PADDING = 4
+DATE_COL_W = 88
+DEFAULT_ROW_H = 22
