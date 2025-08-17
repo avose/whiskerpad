@@ -1,21 +1,23 @@
 import os
 import wx
 
-from whiskerpad.io_worker import IOWorker
-from whiskerpad.storage import ensure_notebook
-from tree import get_root_ids, create_node, load_entry, save_entry
+from whiskerpad.core.io_worker import IOWorker
+from whiskerpad.core.storage import ensure_notebook
+from core.tree import get_root_ids, create_node, load_entry, save_entry
 from ui.top_toolbar import TopToolbar
+from ui.image_import import import_image_into_entry
+from core.tree_utils import add_sibling_after
 from ui.note_panel import NotePanel
-
 
 class MainFrame(wx.Frame):
     def __init__(self):
         super().__init__(None, title="WhiskerPad", size=(900, 700))
+        
         self.io = IOWorker()
-        self.current_nb_path = None
-        self._current_entry_id = None
-        self._current_note_panel = None
-
+        self.current_nb_path: str | None = None
+        self._current_entry_id: str | None = None
+        self._current_note_panel: NotePanel | None = None
+        
         self._build_menu()
         self.CreateStatusBar()
         self.SetStatusText("Ready.")
@@ -25,17 +27,17 @@ class MainFrame(wx.Frame):
 
     def _build_menu(self):
         mb = wx.MenuBar()
-
-        # File
+        
+        # File menu
         m_file = wx.Menu()
         m_new = m_file.Append(wx.ID_NEW, "&New Notebook...\tCtrl-N")
         m_open = m_file.Append(wx.ID_OPEN, "&Open Notebook...\tCtrl-O")
         m_file.AppendSeparator()
         m_quit = m_file.Append(wx.ID_EXIT, "E&xit")
         mb.Append(m_file, "&File")
-
+        
         self.SetMenuBar(mb)
-
+        
         # Bindings
         self.Bind(wx.EVT_MENU, self.on_new_notebook, m_new)
         self.Bind(wx.EVT_MENU, self.on_open_notebook, m_open)
@@ -44,23 +46,24 @@ class MainFrame(wx.Frame):
     def _build_body(self):
         root = wx.Panel(self)
         v = wx.BoxSizer(wx.VERTICAL)
-
+        
         # Top toolbar (always visible)
         tb = TopToolbar(root,
-                        on_open=lambda: self.on_open_notebook(None),
-                        on_add_child=self.on_add_child)
+                       on_open=lambda: self.on_open_notebook(None),
+                       on_add_images=self._on_add_images)
         v.Add(tb, 0, wx.EXPAND)
-
+        
         # Content area below toolbar
         content = wx.Panel(root)
         cs = wx.BoxSizer(wx.VERTICAL)
+        
         self.info = wx.StaticText(content, label="No notebook open.")
         cs.Add(self.info, 0, wx.ALL, 10)
+        
         content.SetSizer(cs)
-
         v.Add(content, 1, wx.EXPAND)
         root.SetSizer(v)
-
+        
         # Keep handles for swapping in NotePanel later
         self._content_panel = content
         self._content_sizer = cs
@@ -77,9 +80,9 @@ class MainFrame(wx.Frame):
             if te.ShowModal() != wx.ID_OK:
                 return
             name = te.GetValue().strip()
-        if not name:
-            wx.MessageBox("Name cannot be empty.", "Error", wx.ICON_ERROR)
-            return
+            if not name:
+                wx.MessageBox("Name cannot be empty.", "Error", wx.ICON_ERROR)
+                return
 
         target = os.path.join(parent, name)
         self.SetStatusText(f"Creating notebook at {target}...")
@@ -90,6 +93,7 @@ class MainFrame(wx.Frame):
             if dd.ShowModal() != wx.ID_OK:
                 return
             path = dd.GetPath()
+
         self.SetStatusText(f"Opening {path}...")
         # Reuse ensure_notebook for validation/load
         self.io.submit(ensure_notebook, path, name=None, callback=self._on_nb_ready)
@@ -104,80 +108,101 @@ class MainFrame(wx.Frame):
 
         self.current_nb_path = result["path"]
         label = f"Notebook: {result['name']}\nPath: {self.current_nb_path}"
-
-        info = getattr(self, "info", None)
-        if info is not None:
-            info.SetLabel(label)
-        else:
-            self.SetTitle(f"WhiskerPad — {result['name']}")
+        
+        if self.info is not None:
+            self.info.SetLabel(label)
+        
+        self.SetTitle(f"WhiskerPad — {result['name']}")
 
         # Auto-show the first root entry (create one if empty)
         roots = get_root_ids(self.current_nb_path)
         if not roots:
             rid = create_node(self.current_nb_path, parent_id=None, title="Root")
+            # Seed the first child under root
+            _first_child = create_node(self.current_nb_path, parent_id=rid, title="")
             roots = [rid]
-        self._show_entry(roots[0])
 
+        self._show_entry(roots[0])
         self.SetStatusText("Notebook ready.")
-
-    # ---------------- Tools actions ----------------
-
-    def on_view_note(self, _evt):
-        """Open the first root; mostly redundant now that we auto-open on _on_nb_ready."""
-        if not self.current_nb_path:
-            wx.MessageBox("Open or create a notebook first.", "Info")
-            return
-        roots = get_root_ids(self.current_nb_path)
-        if not roots:
-            rid = create_node(self.current_nb_path, parent_id=None, title="Root")
-            roots = [rid]
-        self._show_entry(roots[0])
-        self.SetStatusText(f"Viewing root: {roots[0]}")
 
     # ---------------- Embed NotePanel ----------------
 
     def _show_entry(self, entry_id: str):
         """Clear banner content and embed a NotePanel for the given entry."""
         self._content_sizer.Clear(delete_windows=True)
+        
         panel = NotePanel(self._content_panel, self.current_nb_path, entry_id)
         self._content_sizer.Add(panel, 1, wx.EXPAND | wx.ALL, 0)
+        
         self.info = None  # banner label no longer present
         self._content_panel.Layout()
         self._current_entry_id = entry_id
         self._current_note_panel = panel
 
-    # ---------------- Toolbar actions ----------------
+    # --------------- Image import handler ---------------
 
-    def on_add_child(self):
-        # Require an open notebook and an active note panel
-        if not self.current_nb_path or not getattr(self, "_current_note_panel", None):
-            wx.Bell()
-            self.SetStatusText("No entry selected to add a child.")
+    def _on_add_images(self, paths: list[str]) -> None:
+        """
+        Import selected image files into the current entry's directory and
+        create new node(s) after the current selection, each with a single
+        {{img "…"}} token as its text.
+        """
+        if not self.current_nb_path or not self._current_note_panel:
+            wx.LogWarning("Open a notebook first.")
             return
 
-        # Parent = currently selected node (fallback to the root of this panel)
-        parent_id = (self._current_note_panel.current_selection_id()
-                     or getattr(self._current_note_panel, "root_id", None))
-        if not parent_id:
-            wx.Bell()
-            self.SetStatusText("No valid parent entry.")
-            return
+        nb_dir = self.current_nb_path
+        note = self._current_note_panel
+        cur_id = note.current_selection_id() or self._current_entry_id
 
-                # Ensure parent is expanded, then create the child
-        parent = load_entry(self.current_nb_path, parent_id)
-        parent["collapsed"] = False
-        save_entry(self.current_nb_path, parent)
+        if not cur_id:
+            # Fallback to the displayed root
+            cur_id = note.root_id
 
-        child_id = create_node(self.current_nb_path, parent_id=parent_id, title="New Entry")
+        insertion_id = cur_id
+        last_new_id = None
 
-        # Refresh the panel view and auto-select the new child
-        self._current_note_panel.reload()
-        self._current_note_panel.select_entry(child_id)
+        for src in paths:
+            try:
+                # Create a sibling after insertion_id (Enter-like behavior)
+                new_id = add_sibling_after(nb_dir, insertion_id)
+                
+                if new_id:
+                    # Import file into the new entry dir
+                    info = import_image_into_entry(nb_dir, new_id, src)
+                    token = info["token"]
 
+                    # Set the node text to the token
+                    e = load_entry(nb_dir, new_id)
+                    e["text"] = [{"content": token}]  # Rich text format
+                    e["edit"] = ""  # Clear edit field
+                    save_entry(nb_dir, e)
 
-        # Begin inline edit of the new child node text
-        if hasattr(self._current_note_panel, "edit_entry"):
-            self._current_note_panel.edit_entry(child_id)
+                    insertion_id = new_id
+                    last_new_id = new_id
+                else:
+                    # Fallback: create under current entry as child
+                    from tree import create_node
+                    new_id = create_node(nb_dir, parent_id=cur_id, title="")
+                    info = import_image_into_entry(nb_dir, new_id, src)
+                    token = info["token"]
+                    e = load_entry(nb_dir, new_id)
+                    e["text"] = [{"content": token}]  # Rich text format
+                    e["edit"] = ""  # Clear edit field
+                    save_entry(nb_dir, e)
+                    last_new_id = new_id
 
+            except Exception as ex:
+                wx.LogError(f"Failed to add image {src}: {ex}")
 
-        self.SetStatusText(f"Added child {child_id} under {parent_id}")
+        if last_new_id:
+            # Refresh view and select the last created node
+            note.view.rebuild()
+            # Use the selection change method
+            for i, row in enumerate(note.view._rows):
+                if row.entry_id == last_new_id:
+                    note.view._change_selection(i)
+                    break
+            note.select_entry(last_new_id)
+
+        self.SetStatusText(f"Added {len(paths)} image(s).")

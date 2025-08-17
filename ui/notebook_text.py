@@ -1,83 +1,129 @@
 from __future__ import annotations
+
 from typing import List, Dict, Any, Tuple
+from ui.edit_state import RichText, TextRun
 
-def flatten_ops(ops: List[Dict[str, Any]] | None) -> str:
-    """Concatenate Quill-like ops into a single string; normalize CR to LF-only.
-    No exceptions: ignore non-dict items; coerce non-str inserts via str().
+def rich_text_from_entry(entry: Dict[str, Any]) -> RichText:
+    """Get RichText object from an entry, prioritizing edit field during editing."""
+    # During editing, use the edit field if it contains text
+    edit_text = entry.get("edit", "")
+    if edit_text:
+        # Edit field contains plain text - convert to RichText
+        return RichText.from_plain_text(edit_text)
+    
+    # Otherwise use the main text field (rich text format)
+    text_data = entry.get("text", [{"content": ""}])
+    return RichText.from_storage(text_data)
+
+def measure_rich_text_wrapped(
+    rich_text: RichText, 
+    maxw: int, 
+    dc, 
+    font_normal, 
+    font_bold,
+    padding: int
+) -> Tuple[List[Dict[str, Any]], int, int]:
     """
-    if not ops:
-        return ""
-    parts: List[str] = []
-    for op in ops:
-        if not isinstance(op, dict):
-            continue
-        val = op.get("insert", "")
-        if not isinstance(val, str):
-            val = str(val)
-        parts.append(val)
-    return "".join(parts).replace("\r", "")
-def text_from_entry(entry: Dict[str, Any]) -> str:
-    """Prefer entry['ops']; fall back to title (no forced newline)."""
-    txt = flatten_ops(entry.get("ops"))
-    if txt:
-        return txt
-    title = (entry.get("title") or "")
-    return title.replace("\r", "")
-
-def wrap_lines(para: str, maxw: int, dc, out: List[str]) -> None:
-    """Greedy word-wrap with char fallback for long tokens."""
-    if para == "":
-        out.append("")
-        return
-    words = para.split(" ")
-    space_w = dc.GetTextExtent(" ")[0]
-    cur = ""
-    cur_w = 0
-    for w in words:
-        tw = dc.GetTextExtent(w)[0]
-        if not cur:
-            if tw <= maxw:
-                cur, cur_w = w, tw
-            else:
-                for ch in w:
-                    cw = dc.GetTextExtent(ch)[0]
-                    if cur and cur_w + cw > maxw:
-                        out.append(cur); cur = ""; cur_w = 0
-                    cur += ch; cur_w += cw
-        else:
-            if cur_w + space_w + tw <= maxw:
-                cur += " " + w; cur_w += space_w + tw
-            else:
-                out.append(cur)
-                if tw <= maxw:
-                    cur, cur_w = w, tw
+    Measure wrapped rich text and return line information with formatting.
+    
+    Returns:
+        (line_segments, line_height, total_height_with_padding)
+        
+    Where line_segments is a list of:
+    {
+        'segments': [{'text': str, 'bold': bool, 'italic': bool, 'color': str, 'bg': str, 'width': int}],
+        'height': int
+    }
+    """
+    if not rich_text or not rich_text.runs:
+        # Empty rich text
+        dc.SetFont(font_normal)
+        lh = dc.GetTextExtent("Ag")[1]
+        return ([{'segments': [], 'height': lh}], lh, lh + 2 * padding)
+    
+    # Calculate line height from fonts
+    dc.SetFont(font_normal)
+    lh_normal = dc.GetTextExtent("Ag")[1]
+    dc.SetFont(font_bold)
+    lh_bold = dc.GetTextExtent("Ag")[1]
+    line_height = max(lh_normal, lh_bold)
+    
+    line_segments = []
+    current_line = []
+    current_line_width = 0
+    
+    for run in rich_text.runs:
+        font = font_bold if run.bold else font_normal
+        dc.SetFont(font)
+        
+        # Split run by actual newlines first
+        paragraphs = run.content.split('\n')
+        
+        for para_idx, paragraph in enumerate(paragraphs):
+            if para_idx > 0:
+                # Explicit newline - finish current line
+                if current_line:
+                    line_segments.append({
+                        'segments': current_line[:],
+                        'height': line_height
+                    })
+                    current_line = []
+                    current_line_width = 0
+            
+            if not paragraph:
+                continue
+            
+            # Word-wrap this paragraph
+            words = paragraph.split(' ')
+            
+            for word_idx, word in enumerate(words):
+                if word_idx > 0:
+                    # Add space before word (except first word)
+                    word = ' ' + word
+                
+                word_width = dc.GetTextExtent(word)[0]
+                
+                # Check if word fits on current line
+                if current_line_width + word_width <= maxw or not current_line:
+                    # Word fits or it's the first word on line
+                    current_line.append({
+                        'text': word,
+                        'bold': run.bold,
+                        'italic': run.italic,
+                        'color': run.color,
+                        'bg': run.bg,
+                        'width': word_width
+                    })
+                    current_line_width += word_width
                 else:
-                    cur = ""; cur_w = 0
-                    for ch in w:
-                        cw = dc.GetTextExtent(ch)[0]
-                        if cur and cur_w + cw > maxw:
-                            out.append(cur); cur = ""; cur_w = 0
-                        cur += ch; cur_w += cw
-    if cur:
-        out.append(cur)
-
-def measure_wrapped(text: str, maxw: int, dc, font, padding: int) -> Tuple[List[str], int, int]:
-    """
-    Returns (lines, line_height, total_height_with_padding).
-
-    We trim exactly one trailing '\n' for measurement to avoid a phantom blank line
-    (useful for brand-new nodes that may save/emit a trailing newline).
-    """
-    t = (text or "").replace("\r", "")
-    if t.endswith("\n"):
-        t = t[:-1]
-
-    dc.SetFont(font)
-    lh = dc.GetTextExtent("Ag")[1]
-    lines: List[str] = []
-    for para in t.split("\n"):
-        wrap_lines(para, maxw, dc, lines)
-    if not lines:
-        lines = [""]
-    total_h = len(lines) * lh + 2 * padding
-    return lines, lh, total_h
+                    # Word doesn't fit - wrap to next line
+                    line_segments.append({
+                        'segments': current_line[:],
+                        'height': line_height
+                    })
+                    
+                    current_line = [{
+                        'text': word,
+                        'bold': run.bold,
+                        'italic': run.italic,
+                        'color': run.color,
+                        'bg': run.bg,
+                        'width': word_width
+                    }]
+                    current_line_width = word_width
+    
+    # Add final line if any content remains
+    if current_line:
+        line_segments.append({
+            'segments': current_line[:],
+            'height': line_height
+        })
+    elif not line_segments:
+        # Ensure at least one empty line
+        line_segments.append({
+            'segments': [],
+            'height': line_height
+        })
+    
+    total_height = sum(line['height'] for line in line_segments) + 2 * padding
+    return line_segments, line_height, total_height

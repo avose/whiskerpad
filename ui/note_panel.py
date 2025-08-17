@@ -1,6 +1,6 @@
 from __future__ import annotations
 import wx
-from ui.notebook_view import NotebookView
+from ui.view import GCView as NotebookView
 
 class NotePanel(wx.Panel):
     """v2 mixed viewer: node rows with inline carets + interleaved rich blocks (read-only)."""

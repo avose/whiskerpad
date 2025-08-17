@@ -2,17 +2,18 @@ from __future__ import annotations
 import wx
 
 # Use your icons.py (Silk icons via wpIcons)
-from ui.icons import wpIcons  # fallback if imported oddly
+from ui.icons import wpIcons
+from ui.file_dialogs import choose_image_files
 
 class TopToolbar(wx.Panel):
     """
     Simple top toolbar with a vertical gradient background and icon-only buttons.
     Buttons: Open Notebook, Add Child.
     """
-    def __init__(self, parent: wx.Window, on_open, on_add_child=None):
+    def __init__(self, parent: wx.Window, on_open, on_add_images):
         super().__init__(parent, style=wx.BORDER_NONE)
         self._on_open = on_open
-        self._on_add_child = on_add_child
+        self._on_add_images = on_add_images
 
         # Reduce flicker and allow custom paint
         self.SetDoubleBuffered(True)
@@ -27,12 +28,9 @@ class TopToolbar(wx.Panel):
         btn_open = self._make_icon_button("application_get", "Open Notebook", self._on_open)
         s.Add(btn_open, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
 
-        btn_add = self._make_icon_button(
-            "application_side_expand",
-            "Add Child",
-            lambda: self._on_add_child() if self._on_add_child else None,
-        )
-        s.Add(btn_add, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
+        # Add Image(s)
+        btn_img = self._make_icon_button("image_add", "Add Image(s)", self._on_add_images_click)
+        s.Add(btn_img, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
 
         s.AddStretchSpacer(1)
         s.AddSpacer(6)
@@ -70,3 +68,19 @@ class TopToolbar(wx.Panel):
         line = wx.Colour(180, 180, 180)
         dc.SetPen(wx.Pen(line))
         dc.DrawLine(0, h - 1, w, h - 1)
+
+    def _on_add_images_click(self):
+        """
+        Open a file picker and report selected image paths.
+        (Next step will import into the current entry and create new node(s).)
+        If a handler was provided, pass the selected paths to it.
+        """
+        try:
+            paths = choose_image_files(self, multiple=True)
+            if not paths:
+                return
+            # Forward to app handler if available
+            if callable(self._on_add_images):
+                self._on_add_images(paths)
+        except Exception as e:
+            wx.LogError(f"Image selection failed: {e}")

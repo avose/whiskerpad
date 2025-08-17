@@ -1,223 +1,237 @@
-# WhiskerPad — Developer Notes
+WhiskerPad - DEV_NOTES.txt
+Updated: 2025-08-23 (Rich Text Editing Implementation Complete)
 
-Last updated: 2025-08-16 (America/Vancouver). Target env: Python 3.12, wxPython 4.2.3 (phoenix, GTK3).
+================================================================================
+PROJECT OVERVIEW
+================================================================================
+WhiskerPad is a wxPython notebook application that emphasizes smooth scrolling,
+inline images, and hierarchical editing. We have successfully implemented a
+custom rich text editing system that provides WYSIWYG word processor 
+functionality while maintaining the tree structure for organization.
 
-WhiskerPad is a lightweight, local-first notebook with an outline UX. The notebook is a tree of entries, and each entry’s content is its text (stored as Quill-style ops). Editing is inline in the outline; no separate dialog.
+Latest milestone - "Rich Text Editing System"
+- Custom rich text editor using GraphicsContext (not RichTextCtrl)
+- Click anywhere to position cursor and start typing immediately
+- Word processor UX: seamless editing transitions between tree nodes
+- Persistent editing state to prevent data loss on power outages
+- Rich text format with support for bold, italic, colors, and highlights
 
-These notes cover the architecture, data model, UI behavior, dev workflow, and the collaboration conventions for patching.
+================================================================================
+CURRENT ARCHITECTURE
+================================================================================
+The application follows a clean separation between core business logic and UI:
 
--------------------------------------------------------------------------------
+core/  (pure business logic)
+  ├── tree.py               – entry storage, rich text format, CRUD operations
+  ├── tree_utils.py         – indent/outdent, collapse, tree manipulation
+  ├── storage.py            – notebook create/load operations
+  └── io_worker.py          – background I/O thread
 
-## Quickstart
+ui/   (wxPython front-end)
+  ├── view.py               – main ScrolledWindow with rich text editing integration
+  ├── layout.py             – rich text wrapping and layout calculations
+  ├── row.py                – rich text rendering and cursor drawing
+  ├── paint.py              – overall painting coordination
+  ├── mouse.py              – character-level click handling and edit mode entry
+  ├── keys.py               – comprehensive keyboard handling for editing/navigation
+  ├── select.py             – selection management with proper highlight refresh
+  ├── scroll.py             – scrolling with coordinate system handling
+  ├── model.py              – tree flattening for display
+  ├── index.py              – layout indexing for efficient scrolling
+  ├── edit_state.py         – rich text editing state management
+  ├── cursor.py             – cursor positioning and rendering utilities
+  ├── notebook_text.py      – rich text extraction and layout measurement
+  ├── image_utils.py        – thumbnail generation for images
+  ├── image_loader.py       – bitmap caching and loading
+  ├── image_import.py       – image file importing workflow
+  └── main_frame.py         – application frame and notebook management
 
-- Run
-    python3 whiskerpad.py
+utils/ – generic helpers (fs_atomic, img_tokens, paths, image_types, orphan_images)
 
-- wx requirement: ≥ 4.2.3 (phoenix). Enforced at startup.
+================================================================================
+RICH TEXT EDITING SYSTEM
+================================================================================
 
-- Create/Open: toolbar → “Open Notebook” (validates existing folder or creates fresh one).
-
-- Add child: toolbar → “Add Child”.
-
-- Edit:
-    • Single-click to the **right** of the caret → inline editor opens.
-    • Ctrl+Enter or click outside (including the date gutter) → commit.
-    • Esc → cancel (no changes).
-    • Single-click **on/left of caret** → toggle collapse/expand (only if node has children).
-    • Single-click **in left date gutter** → non-interactive no-op (but will still commit any open editor).
-
-- Scroll: vertical scrollbar is always available.
-
--------------------------------------------------------------------------------
-
-## Repository layout (key files)
-
-whiskerpad/
-  whiskerpad.py                # entry script (calls whiskerpad.app:main)
-  app.py                       # wx.App bootstrap; version guard; shows MainFrame
-  io_worker.py                 # background worker (UI-safe callbacks)
-  storage.py                   # ensure_notebook(path,..) for create/open/validate
-  tree.py                      # notebook model + JSON I/O (see Data Model)
-  ui/
-    main_frame.py              # frame, menu, toolbar wiring, embeds NotePanel
-    top_toolbar.py             # Open, Add Child (icons via ui.icons/wpIcons)
-    notebook_view.py           # NotebookView: outline renderer + inline editor
-    notebook_text.py           # text helpers: flatten_ops, wrapping, measuring
-    notebook_hit_test.py       # row rects, hit testing, caret-zone checks
-    icons.py                   # icon registry (Silk icons)
-  icons/
-    ...                        # Silk icons used by wpIcons
-
-.gitignore contains:
-  *~
-  **/__pycache__/
-
--------------------------------------------------------------------------------
-
-## Data model (on disk)
-
-Notebook directory layout:
-
-<notebook-root>/
-  notebook.json                # { name, root_ids: [...] }
-  entries/<id>/entry.json      # one file per entry
-  _trash/                      # reserved (not used yet)
-  _cache/                      # reserved (not used yet)
-
-notebook.json
-
+Storage Format:
+Entries use a clean rich text format in the "text" field:
 {
-  "name": "My Notebook",
-  "root_ids": ["17c629e9ce74", "..."]
-}
-
-entries/<id>/entry.json (current shape)
-
-{
-  "id": "17c629e9ce74",
-  "title": "New Entry",
-  "parent_id": null,               // or parent entry id
-  "collapsed": false,
-  "created_ts": 1723830000,
-  "updated_ts": 1723830000,        // auto-bumped on save_entry()
-  "last_edit_ts": 1723830456,      // set ONLY when ops (content) changes
-  "ops": [                         // OPTIONAL; if empty/absent, UI falls back to 'title'
-    {"insert": "Hello world\n"}
+  "id": "abc123",
+  "text": [
+    {"content": "Hello ", "bold": false, "italic": false, "color": null, "bg": null},
+    {"content": "world", "bold": true, "italic": false, "color": "#ff0000", "bg": null}
   ],
-  "items": [
-    {"type": "child", "id": "abcd1234ef56"},
-    {"type": "rich", "id": "blk-...", "ops": [{"insert": "legacy block\n"}]}
-  ]
+  "edit": "",  // Temporary plain text during editing (auto-saved for crash recovery)
+  "parent_id": "def456",
+  ...
 }
 
-Notes
-- Nodes-as-text: each entry owns its text via ops. We still render legacy rich blocks (read-only) but no longer create new ones.
-- Timestamps
-  • created_ts: set at creation.
-  • updated_ts: set on any save_entry() (structural OR content).
-  • last_edit_ts: set ONLY when ops (content) changes during inline commit. The UI date gutter displays this (fallback to created_ts).
+Core Components:
 
-Key APIs (tree.py)
-- get_root_ids(path), set_root_ids(path, ids)
-- create_node(nb_dir, parent_id=None, title="New Entry", insert_index=None)
-- load_entry(nb_dir, entry_id), save_entry(nb_dir, entry_dict)
-- add_rich_block(...) exists for legacy compatibility (not used by new UI)
+1. EditState Class (ui/edit_state.py):
+   - Manages all editing state (cursor position, rich text being edited)
+   - TextRun and RichText classes for rich text data manipulation
+   - Handles text insertion, deletion, cursor movement
 
--------------------------------------------------------------------------------
+2. Cursor System (ui/cursor.py):
+   - char_pos_from_pixel(): Converts mouse clicks to character positions
+   - pixel_pos_from_char(): Converts character positions to pixel coordinates
+   - Handles rich text wrapping and coordinate systems
+   - CursorRenderer for drawing the text cursor
 
-## UI / UX (current behavior)
+3. Layout System (ui/layout.py):
+   - ensure_wrap_cache(): Calculates rich text layout with word wrapping
+   - Maintains formatting information per line segment
+   - Handles both rich text and image content
 
-NotebookView (ui/notebook_view.py)
-- Virtualized outline: wx.VListBox (owner-drawn, wrapped text).
-- Left date gutter:
-  • DATE_COL_W = 88 px; light grey background with a thin divider.
-  • Shows ISO date (YYYY-MM-DD) from last_edit_ts, fallback to created_ts.
-  • Non-interactive: a click here does not toggle or edit, but WILL commit an open editor first.
-- Caret & indent:
-  • Caret glyph (▶/▼/•) is aligned with the first line (top) of the node, not vertically centered.
-  • Click on/left of caret toggles collapse, but only if the node has children.
-- Inline editor:
-  • Single-click to the right of the caret opens a wx.TextCtrl (TE_MULTILINE | TE_PROCESS_TAB).
-  • Commit: Ctrl+Enter, or click anywhere outside the editor.
-  • Cancel: Esc.
-  • On commit, text is diffed vs the current ops; if changed, ops is updated and last_edit_ts is set.
-- Wrapping & height:
-  • Measurement trims a single trailing newline to avoid phantom blank lines.
-  • Row height (ROW_H) initialized from font metrics (one text line + padding).
-  • Vertical scrollbar is always visible (style + ALWAYS_SHOW_SB).
-- Resize:
-  • Re-measures wrap on width change and repositions any active editor overlay.
+4. Rendering System (ui/row.py):
+   - RowPainter with rich text support
+   - _draw_rich_text(): Renders formatted text with fonts, colors, backgrounds
+   - _draw_cursor(): Positions and draws cursor during editing
+   - Maintains support for image tokens on separate lines
 
-Top toolbar (ui/top_toolbar.py)
-- Buttons:
-  • Open Notebook (application_get)
-  • Add Child (application_side_expand)
-- “Add Text” button was removed (nodes are text).
+User Experience:
+- Click anywhere in text to position cursor and start editing immediately
+- Cursor moves and text appears as you type (full WYSIWYG experience)
+- Enter key creates new sibling nodes (like paragraphs in word processors)  
+- Shift+Enter inserts literal newlines within current node
+- Escape cancels editing, clicking elsewhere saves and switches nodes
+- Tab/Shift+Tab for tree operations (indent/outdent) work during editing
+- All existing tree navigation preserved (arrows, page up/down, etc.)
 
-MainFrame (ui/main_frame.py)
-- Menubar: New (create), Open, Exit.
-- After open/create, ensures at least one root entry and shows it.
-- “Add Child” expands the parent, creates a child, reloads the view, and selects it.
+Technical Features:
+- Custom implementation using wxPython GraphicsContext for full control
+- Efficient partial refresh during editing (only redraws changed areas)
+- Proper coordinate system handling for scrolled content
+- Automatic crash recovery via persistent "edit" field
+- Character-level mouse hit testing with sub-pixel accuracy
+- Rich text wrapping that preserves formatting across line breaks
 
--------------------------------------------------------------------------------
+================================================================================
+KEY IMPLEMENTATION DETAILS
+================================================================================
 
-## Development workflow & conventions
+Coordinate Systems:
+The application handles multiple coordinate systems correctly:
+- Content coordinates: Where text actually exists in the document
+- Window coordinates: What the user sees in the scrolled view
+- Mouse click conversion accounts for scroll offsets
 
-Critical collaboration rules
-- If anything is unclear, **please ask** before patching. Ask for:
-  • the exact file contents (provide sed -n 'a,bp' file | nl -ba),
-  • the exact command(s) run and full stdout/stderr,
-  • screenshots are fine but text logs are better.
-- One instruction at a time for chains (install/config/run). Wait for confirmation at each step.
-- Small, surgical patches; commit after each user-visible change or fix.
-- Prefer single-file rewrites when safer/clearer than a regex edit.
-- No migrations unless specifically requested (we test on fresh notebooks during MVP).
+Edit Mode Flow:
+1. Mouse click -> char_pos_from_click() -> enter_edit_mode()
+2. Keyboard input -> EditState manipulation -> immediate save to "edit" field
+3. Exit editing -> commit rich text to "text" field -> clear "edit" field
 
-Coding structure
-- Keep NotebookView lean by factoring helpers:
-  • ui/notebook_text.py → flatten_ops, wrap_lines, measure_wrapped
-  • ui/notebook_hit_test.py → item_rect, hit_test, caret_hit
-- UI changes should come with clear click/keyboard contracts and platform-safe wx patterns (focus, flicker, resize).
+Selection and Highlighting:
+- _change_selection() method ensures both old and new highlights refresh
+- Proper coordinate conversion for RefreshRect() calls
+- Full refresh fallback for reliability
 
-Git habits
-- Keep “git add …” and “git commit -m …” as separate commands.
-- Commit message style: user-visible change first, internal detail second.
+Image Integration:
+- Images remain on separate lines (no inline images within text)
+- Image import creates nodes with {{img "filename"}} tokens
+- Existing image functionality fully preserved
 
--------------------------------------------------------------------------------
+Performance Optimizations:
+- Layout caching prevents unnecessary recalculation
+- Partial refreshes during editing
+- Efficient text measurement and character positioning
+- Bitmap caching for image thumbnails
 
-## Troubleshooting (common/solved)
+================================================================================
+CURRENT STATUS
+================================================================================
 
-- No scrollbar → enabled wx.VSCROLL | wx.WANTS_CHARS and ALWAYS_SHOW_SB.
-- Two-line “New Entry” rows → stopped forcing newline on commit; measurement trims a single trailing newline.
-- Editor didn’t commit on click-away → _on_left_down commits before handling gutter/no-op.
-- Caret was vertically centered → now drawn at top line (rect.y + PADDING).
-- Spacebar didn’t insert space (early dev) → ensured editor gets key events.
+Completed Features:
+✓ Rich text editing with cursor positioning
+✓ Click-to-edit functionality
+✓ Word processor-style Enter key behavior
+✓ Character-level mouse interaction
+✓ Keyboard input handling (letters, numbers, symbols with shift)
+✓ Tree navigation integration (Tab, arrows, etc.)
+✓ Crash-resistant editing with auto-save
+✓ Rich text storage format
+✓ Image import and display
+✓ Scrolling and coordinate system handling
+✓ Selection highlighting with proper refresh
 
-If you hit a regression:
-1) Reproduce and include exact traceback or description.
-2) Paste the relevant file segment with line numbers.
-3) We’ll patch in a small step and validate.
+Known Working:
+- Create new notebooks with rich text format
+- Click anywhere to edit at precise cursor positions
+- Type text and see immediate feedback
+- Use Enter to create new nodes, Shift+Enter for newlines
+- Navigate tree with keyboard while preserving editing
+- Import images that display correctly
+- Scroll and edit at any position
+- Selection highlighting updates correctly
 
--------------------------------------------------------------------------------
+================================================================================
+NEXT DEVELOPMENT PRIORITIES
+================================================================================
 
-## Short roadmap
+1. File Drag and Drop Support:
+   - Implement wx.FileDropTarget for the main view
+   - Support dragging image files directly into the application
+   - Auto-import and create nodes for dropped files
+   - Handle multiple file drops efficiently
 
-Polish
-- Keyboard polish (e.g., Tab behavior for indent/outdent).
-- Configurable date gutter format (keep ISO default).
-- Hover affordance for caret zone.
+2. Rich Text Formatting UI:
+   - Add text color and background color selection
+   - Keyboard shortcuts for formatting (Ctrl+B for bold, Ctrl+I for italic)
+   - Text selection with mouse drag
+   - Apply formatting to selected text ranges
+   - Format toolbar or context menu
 
-Editing & structure
-- Drag-and-drop reordering.
-- Multi-select operations (collapse/expand group, move group).
-- Undo/Redo stack (content first; then structure).
-- Autosave debounce and dirty indicators.
+3. Small Issues to Address:
+   - Selection highlight persistence issues in edge cases
+   - Potential cursor positioning accuracy improvements
+   - Performance optimization for very large documents
+   - Edge cases in coordinate conversion
+   - Text selection behavior refinement
 
-Rendering
-- Richer text phase (switch to StyledTextCtrl or RichTextCtrl path; keep wrapping/measure abstractions).
+4. Advanced Features (Future):
+   - Copy/paste with formatting preservation
+   - Undo/redo system for rich text operations
+   - Find/replace functionality
+   - Export capabilities (HTML, PDF, etc.)
+   - Themes and appearance customization
 
-Persistence
-- Export/Import (Markdown bundle, JSON).
-- Trash/restore semantics.
+================================================================================
+DEVELOPMENT WORKFLOW
+================================================================================
 
--------------------------------------------------------------------------------
+Testing Strategy:
+- Create new notebooks to test rich text format
+- Test editing at various scroll positions
+- Verify tree operations work during editing
+- Test image import and display
+- Check coordinate systems with different window sizes
 
-## Sanity test sequence
+Code Quality:
+- Clean separation between core and UI layers
+- No backwards compatibility or migration code
+- Comprehensive error handling
+- Consistent coordinate system handling
+- Efficient rendering and caching strategies
 
-1. Create a notebook → verify folder structure and a single root.
-2. Add several children → scrollbar appears; caret toggles expand/collapse as expected.
-3. Inline edit nodes → Ctrl+Enter commits; click-away commits; Esc cancels.
-4. Date gutter shows created date first; after editing, shows last edit date.
-5. Resize window → editor overlay repositions correctly; wrapped text re-measures.
-6. Empty text → renders as a single line; no phantom blank line.
+Architecture Decisions:
+- Custom rich text implementation provides full control
+- GraphicsContext ensures consistent cross-platform rendering
+- EditState pattern centralizes editing logic
+- Rich text runs format balances simplicity and functionality
+- Persistent edit field prevents data loss
 
--------------------------------------------------------------------------------
+================================================================================
+NOTES
+================================================================================
 
-## When opening a new chat
+- The rich text system is designed for simplicity and performance
+- No complex layouts (tables, columns) - tree structure provides organization
+- Images always on separate lines for clean layout
+- Custom implementation avoids wxPython RichTextCtrl limitations
+- Edit field auto-save provides excellent crash recovery
+- Word processor UX with tree structure benefits
+- Coordinate system handling is critical for proper cursor positioning
+- Full refresh fallback ensures reliability over micro-optimizations
 
-Please include:
-- The exact command(s) you ran and full stdout/stderr (use code blocks).
-- The specific file/lines you’re referring to (use sed -n 'a,bp' file | nl -ba).
-- What you expected vs what happened.
-
-Remember: if anything is ambiguous, **ask first**. We will go slowly and think through the change before writing code.
+Next session should focus on drag-and-drop file support and color formatting.
+Update this file as new features are implemented.
