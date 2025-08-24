@@ -82,3 +82,33 @@ class LayoutIndex:
     def content_height(self) -> int:
         """Get the total content height."""
         return self.total_height
+
+    def insert_row(self, view, insert_idx: int, new_row: Row):
+        """Insert a single row and update layout incrementally."""
+        if not (0 <= insert_idx <= len(self.heights)):
+            # Out of bounds, trigger full rebuild
+            self.rebuild(view, view._rows)
+            return
+
+        # Measure the new row
+        from ui.layout import measure_row_height
+        new_height = measure_row_height(view, new_row)
+
+        # Insert height at the correct position
+        self.heights.insert(insert_idx, new_height)
+
+        # Recalculate offsets from insertion point onward
+        if insert_idx == 0:
+            new_offset = 0
+        else:
+            new_offset = self.offsets[insert_idx - 1] + self.heights[insert_idx - 1]
+
+        # Insert the new offset
+        self.offsets.insert(insert_idx, new_offset)
+
+        # Update all subsequent offsets
+        for i in range(insert_idx + 1, len(self.offsets)):
+            self.offsets[i] += new_height
+
+        # Update total height
+        self.total_height += new_height

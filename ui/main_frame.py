@@ -8,20 +8,38 @@ from ui.top_toolbar import TopToolbar
 from ui.image_import import import_image_into_entry
 from core.tree_utils import add_sibling_after
 from ui.note_panel import NotePanel
+from ui.icons import wpIcons
 
 class MainFrame(wx.Frame):
     def __init__(self):
         super().__init__(None, title="WhiskerPad", size=(900, 700))
-        
+
         self.io = IOWorker()
         self.current_nb_path: str | None = None
         self._current_entry_id: str | None = None
         self._current_note_panel: NotePanel | None = None
-        
+
+        book_bitmap = wpIcons.Get("book")
+        icon = wx.Icon()
+        icon.CopyFromBitmap(book_bitmap)
+        self.SetIcon(icon)
+
         self._build_menu()
         self.CreateStatusBar()
         self.SetStatusText("Ready.")
         self._build_body()
+
+    # ---------------- FG / BG coloring ----------------
+
+    def _on_fg_color_changed(self, color):
+        """Handle foreground color change from toolbar"""
+        # This gets called with the actual wx.Colour object
+        self.SetStatusText(f"Text color: RGB({color.Red()}, {color.Green()}, {color.Blue()})")
+
+    def _on_bg_color_changed(self, color):
+        """Handle background color change from toolbar"""  
+        # This gets called with the actual wx.Colour object
+        self.SetStatusText(f"Background color: RGB({color.Red()}, {color.Green()}, {color.Blue()})")
 
     # ---------------- UI scaffolding ----------------
 
@@ -46,24 +64,27 @@ class MainFrame(wx.Frame):
     def _build_body(self):
         root = wx.Panel(self)
         v = wx.BoxSizer(wx.VERTICAL)
-        
-        # Top toolbar (always visible)
-        tb = TopToolbar(root,
-                       on_open=lambda: self.on_open_notebook(None),
-                       on_add_images=self._on_add_images)
-        v.Add(tb, 0, wx.EXPAND)
-        
+
+        # Top toolbar with proper color picker callbacks
+        self._toolbar = TopToolbar(root,
+                                  on_open=lambda: self.on_open_notebook(None),
+                                  on_add_images=self._on_add_images,
+                                  on_fg_color=self._on_fg_color_changed,
+                                  on_bg_color=self._on_bg_color_changed)
+        v.Add(self._toolbar, 0, wx.EXPAND)
+
         # Content area below toolbar
         content = wx.Panel(root)
         cs = wx.BoxSizer(wx.VERTICAL)
-        
+
         self.info = wx.StaticText(content, label="No notebook open.")
         cs.Add(self.info, 0, wx.ALL, 10)
-        
+
         content.SetSizer(cs)
         v.Add(content, 1, wx.EXPAND)
+
         root.SetSizer(v)
-        
+
         # Keep handles for swapping in NotePanel later
         self._content_panel = content
         self._content_sizer = cs
@@ -130,12 +151,16 @@ class MainFrame(wx.Frame):
     def _show_entry(self, entry_id: str):
         """Clear banner content and embed a NotePanel for the given entry."""
         self._content_sizer.Clear(delete_windows=True)
-        
-        panel = NotePanel(self._content_panel, self.current_nb_path, entry_id)
+
+        # Pass our existing _on_add_images method as the drag & drop callback
+        # This is the SAME method the toolbar button calls!
+        panel = NotePanel(self._content_panel, self.current_nb_path, entry_id, 
+                         on_image_drop=self._on_add_images)
+
         self._content_sizer.Add(panel, 1, wx.EXPAND | wx.ALL, 0)
-        
-        self.info = None  # banner label no longer present
+        self.info = None # banner label no longer present
         self._content_panel.Layout()
+
         self._current_entry_id = entry_id
         self._current_note_panel = panel
 

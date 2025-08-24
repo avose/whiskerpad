@@ -36,21 +36,25 @@ def handle_edit_mode_keys(view, evt: wx.KeyEvent) -> bool:
     # Enter key handling
     if code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
         if evt.ShiftDown():
-            # Shift+Enter: insert literal newline
             view.insert_text_at_cursor("\n")
         else:
-            # Regular Enter: finish editing and create new sibling (empty)
+            # OPTIMIZED: Fast incremental node addition
             current_entry_id = view._edit_state.entry_id
             view.exit_edit_mode(save=True)
 
-            # Create new empty sibling after current node
+            # Create new sibling
             new_id = add_sibling_after(view.nb_dir, current_entry_id)
             if new_id:
-                view.rebuild()
+                # Get parent for incremental update
+                current_entry = view._get(current_entry_id)
+                parent_id = current_entry.get("parent_id")
+
+                # Use incremental insertion instead of full rebuild
+                view.add_node_incremental(parent_id, new_id, current_entry_id)
+
                 # Find and start editing the new node
                 for i, row in enumerate(view._rows):
                     if row.entry_id == new_id:
-                        view._change_selection(i)
                         view.enter_edit_mode(i, 0)
                         break
         return True
@@ -234,7 +238,13 @@ def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
             cur_id = view._rows[sel].entry_id
             new_id = add_sibling_after(view.nb_dir, cur_id)
             if new_id:
-                view.rebuild()
+                # OPTIMIZED: Use incremental insertion instead of full rebuild
+                current_entry = view._get(cur_id)
+                parent_id = current_entry.get("parent_id")
+
+                # Use incremental insertion 
+                view.add_node_incremental(parent_id, new_id, cur_id)
+
                 # Find and start editing the new empty node
                 for i, row in enumerate(view._rows):
                     if row.entry_id == new_id:

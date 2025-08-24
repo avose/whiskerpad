@@ -1,9 +1,17 @@
+# ui/view.py  – refactored for unified NotebookCache
 from __future__ import annotations
 
 import wx
 from typing import Dict, Any, List, Optional
 
-from core.tree import load_entry, commit_entry_edit, cancel_entry_edit, set_entry_edit_text
+# -----------------------------------------------------------------------------
+# project imports
+# -----------------------------------------------------------------------------
+from core.tree import (
+    commit_entry_edit,
+    cancel_entry_edit,
+    set_entry_edit_text,
+)
 from core.tree_utils import (
     add_sibling_after,
     indent_under_prev_sibling,
@@ -11,6 +19,7 @@ from core.tree_utils import (
     toggle_collapsed,
 )
 
+from ui.cache import NotebookCache
 from ui.constants import INDENT_W, GUTTER_W, PADDING, DATE_COL_W, DEFAULT_ROW_H
 from ui.types import Row
 from ui.model import flatten_tree
@@ -18,68 +27,76 @@ from ui.layout import measure_row_height
 from ui.row import RowPainter, RowMetrics, caret_hit, item_rect
 from ui.select import select_entry_id
 from ui.mouse import (
-    handle_left_down, handle_left_up, handle_left_dclick,
-    handle_motion, handle_mousewheel
+    handle_left_down,
+    handle_left_up,
+    handle_left_dclick,
+    handle_motion,
+    handle_mousewheel,
 )
 from ui.keys import handle_key_event
 from ui.paint import paint_background, paint_rows
 from ui.scroll import soft_ensure_visible, visible_range, clamp_scroll_y
 from ui.index import LayoutIndex
 
-# NEW: Rich text editing imports
 from ui.edit_state import EditState, RichText
 from ui.notebook_text import rich_text_from_entry
-from ui.cursor import CursorRenderer
+from ui.cursor import CursorRenderer  # only for selection outline
 
+# =============================================================================
 class GCView(wx.ScrolledWindow):
     """
-    GraphicsContext-based, variable-row-height view of the entry tree with rich text editing.
+    GraphicsContext-based, variable-row-height view of the entry tree
+    with inline rich-text editing.
     """
 
-    def __init__(self, parent: wx.Window, nb_dir: str, root_id: str):
+    # ------------------------------------------------------------------ #
+    # construction
+    # ------------------------------------------------------------------ #
+
+    def __init__(self, parent: wx.Window, nb_dir: str, root_id: str, on_image_drop=None):
         super().__init__(parent, style=wx.BORDER_SIMPLE | wx.WANTS_CHARS)
 
         self.nb_dir = nb_dir
         self.root_id = root_id
 
-        # Initialize core data structures - these always exist
-        self._entry_cache: Dict[str, Dict[str, Any]] = {}
+        # central cache
+        self.cache = NotebookCache(nb_dir)
+
+        # flattened rows + selection
         self._rows: List[Row] = []
         self._sel: int = -1
-        self._wrap_cache_w: int = -1
+
+        # layout index
         self._index: LayoutIndex = LayoutIndex()
 
-        # NEW: Rich text editing state
+        # rich-text editing state
         self._edit_state = EditState()
         self._cursor_renderer = CursorRenderer()
-        
-        # NEW: Cursor blinking timer
         self._cursor_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_cursor_blink)
 
-        # Layout constants
+        # layout constants
         self.INDENT_W = INDENT_W
         self.GUTTER_W = GUTTER_W
         self.PADDING = PADDING
         self.DATE_COL_W = DATE_COL_W
 
-        # RowPainter with explicit metrics
+        # row painter
         self._metrics = RowMetrics(
             DATE_COL_W=self.DATE_COL_W,
             INDENT_W=self.INDENT_W,
             GUTTER_W=self.GUTTER_W,
             PADDING=self.PADDING,
         )
-
         self._row_painter = RowPainter(self, self._metrics)
 
-        # Configure appearance and scrolling
+        # appearance + scrolling
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.SetDoubleBuffered(True)
-        self.SetBackgroundColour(wx.Colour(246, 252, 246))  # ~#F6FCF6
-        self.SetScrollRate(0, 1)  # pixel-based vertical scrolling
+        self.SetBackgroundColour(wx.Colour(246, 252, 246))
+        self.SetScrollRate(0, 1)  # pixel vertical scrolling
 
-        # Initialize fonts and calculate row height
+        # fonts + default row height
         self._font = self.GetFont()
         self._bold = wx.Font(
             self._font.GetPointSize(),
@@ -87,14 +104,12 @@ class GCView(wx.ScrolledWindow):
             wx.FONTSTYLE_NORMAL,
             wx.FONTWEIGHT_BOLD,
         )
-
-        # Calculate row height from font metrics
         dc = wx.ClientDC(self)
         dc.SetFont(self._font)
         lh = dc.GetTextExtent("Ag")[1]
         self.ROW_H = max(lh + 2 * self.PADDING, DEFAULT_ROW_H)
 
-        # Bind events
+        # event bindings
         self.Bind(wx.EVT_PAINT, self._on_paint)
         self.Bind(wx.EVT_SIZE, self._on_size)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_char)
@@ -104,359 +119,400 @@ class GCView(wx.ScrolledWindow):
         self.Bind(wx.EVT_LEFT_DCLICK, self._on_left_dclick)
         self.Bind(wx.EVT_MOUSEWHEEL, self._on_mousewheel)
 
-        # Build initial model
+        # track last client width for cheap resize detection
+        self._last_client_w = self.GetClientSize().width
+
+        # Set up drag & drop for images
+        if on_image_drop:
+            from ui.drag_drop import ImageDropTarget
+            drop_target = ImageDropTarget(self, on_image_drop)
+            self.SetDropTarget(drop_target)
+
+        # build model
         self.rebuild()
 
-    # ------------------ cache + data ------------------
+    # ------------------------------------------------------------------ #
+    # thin helper: keep legacy _get(...) usage alive
+    # ------------------------------------------------------------------ #
 
     def _get(self, eid: str) -> Dict[str, Any]:
-        """Get entry from cache or load from disk."""
-        e = self._entry_cache.get(eid)
-        if e is None:
-            e = load_entry(self.nb_dir, eid)
-            self._entry_cache[eid] = e
-        return e
+        return self.cache.entry(eid)
+
+    # ------------------------------------------------------------------ #
+    # cache invalidation wrappers
+    # ------------------------------------------------------------------ #
 
     def invalidate_cache(self, entry_id: Optional[str] = None) -> None:
-        """Invalidate entry and row caches."""
         if entry_id:
-            self._entry_cache.pop(entry_id, None)
-            for r in self._rows:
-                if r.entry_id == entry_id:
-                    r.cache.clear()
+            self.cache.invalidate_entry(entry_id)
         else:
-            self._entry_cache.clear()
-            for r in self._rows:
-                r.cache.clear()
+            self.cache.invalidate_all()
+
+    def invalidate_cache_selective(self, ids: set[str]) -> None:
+        self.cache.invalidate_entries(ids)
+
+    # ------------------------------------------------------------------ #
+    # selection helpers
+    # ------------------------------------------------------------------ #
 
     def _change_selection(self, new_idx: int):
-        """Change selection and force full refresh to update highlights properly."""
         if not (0 <= new_idx < len(self._rows)):
             new_idx = -1
-
         if self._sel == new_idx:
             return
-
         self._sel = new_idx
+        self.Refresh(False)  # repaint to update highlight
 
-        # Force full refresh to ensure highlight changes are visible
-        self.Refresh(False)
+    # ------------------------------------------------------------------ #
+    # rebuilding / flattening
+    # ------------------------------------------------------------------ #
 
     def rebuild(self) -> None:
-        """Re-flatten tree and refresh. Keep selection by entry_id if possible."""
+        """Re-flatten tree, keep selection when possible, rebuild index."""
         prev_id = self.current_entry_id()
-        old_sel = self._sel  # Store old selection for refresh
 
-        # Clear caches and rebuild model
-        self._entry_cache.clear()
+        self.cache.invalidate_all()
         self._rows = flatten_tree(self.nb_dir, self.root_id)
         self._index.rebuild(self, self._rows)
 
-        # Set virtual size for ScrolledWindow
-        total_height = self._index.content_height() if self._rows else 0
-        self.SetVirtualSize((-1, total_height))
+        total_h = self._index.content_height() if self._rows else 0
+        self.SetVirtualSize((-1, total_h))
 
-        # Restore selection using the helper method
         if prev_id:
             for i, r in enumerate(self._rows):
                 if r.entry_id == prev_id:
-                    self._change_selection(i)  # This will refresh both old and new
+                    self._change_selection(i)
                     break
+            else:
+                self._change_selection(-1)
         else:
-            self._change_selection(-1)  # Clear selection properly
+            self._change_selection(-1)
 
-        # Update edit state if editing row changed
+        # sync edit-state row index
         if self._edit_state.active:
-            new_idx = -1
-            for i, r in enumerate(self._rows):
-                if r.entry_id == self._edit_state.entry_id:
-                    new_idx = i
-                    break
-
+            new_idx = next(
+                (i for i, r in enumerate(self._rows) if r.entry_id == self._edit_state.entry_id),
+                -1,
+            )
             if new_idx >= 0:
                 self._edit_state.row_idx = new_idx
             else:
                 self.exit_edit_mode(save=False)
 
-        # Force immediate repaint
         self.Refresh(False)
         self.Update()
 
-    # ------------------ Rich Text Editing ------------------
+    # ==========================================================================
+    # rich-text editing helpers  (unchanged except cache calls)
+    # ==========================================================================
 
-    def _on_cursor_blink(self, evt):
-        """Handle cursor blinking."""
+    def _on_cursor_blink(self, _evt):
         if self._edit_state.active:
             self._edit_state.cursor_visible = not self._edit_state.cursor_visible
             self._refresh_edit_row()
 
     def _refresh_edit_row(self):
-        """Efficiently refresh just the row being edited."""
         if not self._edit_state.active:
             return
-
-        # Get row rect in content coordinates
         row_rect = item_rect(self, self._edit_state.row_idx)
 
-        # Convert to window coordinates by subtracting scroll offset
         scroll_x, scroll_y = self.GetViewStart()
         scroll_y_px = scroll_y * self.GetScrollPixelsPerUnit()[1]
 
-        # Adjust rect to window coordinates
         window_rect = wx.Rect(
             row_rect.x,
             row_rect.y - scroll_y_px,
             row_rect.width,
-            row_rect.height + 4  # Add small margin for cursor
+            row_rect.height + 4,
         )
-
-        # Only refresh if the rect is visible in the current window
-        client_height = self.GetClientSize().height
-        if (window_rect.y < client_height and 
-            window_rect.y + window_rect.height > 0):
+        if window_rect.y < self.GetClientSize().height and window_rect.Bottom > 0:
             self.RefreshRect(window_rect)
-        else:
-            # Row not visible, no need to refresh
-            pass
+
+    # ------------- enter/exit edit -------------------------------------- #
 
     def enter_edit_mode(self, row_idx: int, cursor_pos: int = 0):
-        """Start editing a row at the specified cursor position."""
-        # Save any existing edit first
         self._save_current_edit()
 
-        # Get the row and entry
         if not (0 <= row_idx < len(self._rows)):
             return
-
         row = self._rows[row_idx]
         entry = self._get(row.entry_id)
-
-        # Get initial rich text
         rich_text = rich_text_from_entry(entry)
 
-        # Start editing
         self._edit_state.start_editing(row_idx, row.entry_id, rich_text, cursor_pos)
-
-        # Start cursor blinking
-        self._cursor_timer.Start(500)  # 500ms blink rate
-
-        # Update selection to edited row
+        self._cursor_timer.Start(500)
         self._sel = row_idx
 
-        # Refresh display
         self.invalidate_cache(row.entry_id)
         self._refresh_edit_row()
 
     def exit_edit_mode(self, save: bool = True):
-        """Stop editing and optionally save changes."""
         if not self._edit_state.active:
             return
-
-        # Get entry_id BEFORE calling stop_editing (which clears it)
         entry_id = self._edit_state.entry_id
-        final_rich_text = self._edit_state.stop_editing()
+        final_rt = self._edit_state.stop_editing()
         self._cursor_timer.Stop()
 
-        if save and final_rich_text is not None and entry_id:
-            # Commit rich text to storage
-            commit_entry_edit(self.nb_dir, entry_id, final_rich_text.to_storage())
+        if save and final_rt and entry_id:
+            commit_entry_edit(self.nb_dir, entry_id, final_rt.to_storage())
         elif entry_id:
-            # Cancel: clear the edit field
             cancel_entry_edit(self.nb_dir, entry_id)
 
         if entry_id:
             self.invalidate_cache(entry_id)
-
-        # Force full refresh to ensure proper redraw of highlights
         self.Refresh()
 
     def _save_current_edit(self):
-        """Save the current edit text to the edit field."""
-        if self._edit_state.active and self._edit_state.rich_text and self._edit_state.entry_id:
-            # Save plain text to edit field for crash recovery
-            plain_text = self._edit_state.get_plain_text()
-            set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain_text)
+        if self._edit_state.active and self._edit_state.entry_id:
+            plain = self._edit_state.get_plain_text()
+            set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
 
+    # used after each keystroke while editing
     def _invalidate_edit_row_cache(self):
-        """Invalidate cache for the row being edited."""
         if self._edit_state.active:
-            for r in self._rows:
-                if r.entry_id == self._edit_state.entry_id:
-                    r.cache.clear()
-                    break
-            # Rebuild layout for the edited row
+            self.cache.invalidate_entry(self._edit_state.entry_id)
             self._index.rebuild(self, self._rows)
 
-    # ------------------ Text Editing Operations ------------------
+    # ------------------------------------------------------------------ #
+    # subtree-specific invalidation  (collapse/expand fast path)
+    # ------------------------------------------------------------------ #
 
-    def insert_text_at_cursor(self, text: str):
-        """Insert text at current cursor position."""
-        if not self._edit_state.active:
+    def invalidate_subtree_cache(self, root_entry_id: str):
+        ids = self._get_subtree_entry_ids(root_entry_id)
+        self.cache.invalidate_entries(ids)
+
+    def _get_subtree_entry_ids(self, root_id: str) -> set[str]:
+        result = {root_id}
+        try:
+            entry = self._get(root_id)
+            for item in entry.get("items", []):
+                if isinstance(item, dict) and item.get("type") == "child":
+                    cid = item.get("id")
+                    if isinstance(cid, str):
+                        result.update(self._get_subtree_entry_ids(cid))
+        except Exception:
+            pass
+        return result
+
+    # ------------------------------------------------------------------ #
+    # incremental collapse / expand
+    # ------------------------------------------------------------------ #
+
+    def toggle_collapsed_fast(self, entry_id: str):
+        toggle_collapsed(self.nb_dir, entry_id)
+        self.invalidate_subtree_cache(entry_id)
+
+        from ui.model import update_tree_incremental
+        self._rows = update_tree_incremental(self.nb_dir, self._rows, entry_id)
+        self._index.rebuild(self, self._rows)
+
+        self.SetVirtualSize((-1, self._index.content_height()))
+        self._refresh_changed_area(entry_id)
+
+    # ------------------------------------------------------------------ #
+    # incremental insert (unchanged except cache access)
+    # ------------------------------------------------------------------ #
+
+    def add_node_incremental(
+        self, parent_entry_id: str, new_entry_id: str, insert_after_id: str | None = None
+    ):
+        insert_idx = -1
+        if insert_after_id:
+            for i, row in enumerate(self._rows):
+                if row.entry_id == insert_after_id:
+                    insert_idx = i + 1
+                    break
+        if insert_idx == -1:
+            self.rebuild()
             return
 
-        self._edit_state.insert_text(text)
+        try:
+            _ = self._get(new_entry_id)  # ensure cached
+            level = self._rows[insert_idx - 1].level if insert_after_id else self._rows[
+                insert_idx - 1
+            ].level + 1
+            new_row = Row(kind="node", entry_id=new_entry_id, level=level)
 
-        # Immediately save to edit field and invalidate cache
-        plain_text = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain_text)
+            self._rows.insert(insert_idx, new_row)
+            self._index.insert_row(self, insert_idx, new_row)
+
+            self.SetVirtualSize((-1, self._index.content_height()))
+            self._refresh_from_row(insert_idx)
+        except Exception:
+            self.rebuild()
+
+    # ------------------------------------------------------------------ #
+    # partial refresh helpers
+    # ------------------------------------------------------------------ #
+
+    def _refresh_from_row(self, start_idx: int):
+        if start_idx >= len(self._rows):
+            return
+        start_rect = item_rect(self, start_idx)
+        w, h = self.GetClientSize()
+        if start_rect.IsEmpty():
+            self.Refresh()
+            return
+        sx, sy = self.GetViewStart()
+        sy_px = sy * self.GetScrollPixelsPerUnit()[1]
+        refresh_rect = wx.Rect(
+            0,
+            max(0, start_rect.y - sy_px),
+            w,
+            max(1, h - max(0, start_rect.y - sy_px)),
+        )
+        self.RefreshRect(refresh_rect)
+
+    def _refresh_changed_area(self, entry_id: str):
+        idx = next((i for i, r in enumerate(self._rows) if r.entry_id == entry_id), -1)
+        if idx < 0:
+            self.Refresh()
+            return
+        rect = item_rect(self, idx)
+        w, h = self.GetClientSize()
+        if rect.IsEmpty() or w <= 0 or h <= 0:
+            self.Refresh()
+            return
+        refresh_rect = wx.Rect(0, max(0, rect.y), w, max(1, h - rect.y))
+        self.RefreshRect(refresh_rect)
+
+    # ==========================================================================
+    # keystroke-driven text edit helpers (unchanged except cache calls)
+    # ==========================================================================
+
+    def insert_text_at_cursor(self, text: str):
+        if not self._edit_state.active:
+            return
+        self._edit_state.insert_text(text)
+        plain = self._edit_state.get_plain_text()
+        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
         self._refresh_edit_row()
 
     def delete_char_before_cursor(self):
-        """Delete character before cursor (backspace)."""
         if not self._edit_state.active:
             return
-
         self._edit_state.delete_before_cursor()
-
-        # Immediately save to edit field and invalidate cache
-        plain_text = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain_text)
+        plain = self._edit_state.get_plain_text()
+        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
         self._refresh_edit_row()
 
     def delete_char_after_cursor(self):
-        """Delete character after cursor (delete key)."""
         if not self._edit_state.active:
             return
-
         self._edit_state.delete_after_cursor()
-
-        # Immediately save to edit field and invalidate cache
-        plain_text = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain_text)
+        plain = self._edit_state.get_plain_text()
+        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
         self._refresh_edit_row()
 
     def move_cursor(self, delta: int):
-        """Move cursor by delta characters."""
-        if not self._edit_state.active:
-            return
+        if self._edit_state.active:
+            self._edit_state.move_cursor(delta)
+            self._refresh_edit_row()
 
-        self._edit_state.move_cursor(delta)
-        self._refresh_edit_row()
+    def set_cursor_position(self, pos: int):
+        if self._edit_state.active:
+            self._edit_state.set_cursor_position(pos)
+            self._refresh_edit_row()
 
-    def set_cursor_position(self, position: int):
-        """Set cursor to specific position."""
-        if not self._edit_state.active:
-            return
-
-        self._edit_state.set_cursor_position(position)
-        self._refresh_edit_row()
-
-    # ------------------ painting ------------------
+    # ------------------------------------------------------------------ #
+    # painting
+    # ------------------------------------------------------------------ #
 
     def _on_paint(self, _evt: wx.PaintEvent):
-        """Paint the view using GraphicsContext."""
         dc = wx.AutoBufferedPaintDC(self)
         gc = wx.GraphicsContext.Create(dc)
         ch = self.GetClientSize().height
 
         paint_background(self, gc, ch)
 
-        # Get scroll position from ScrolledWindow
-        scroll_x, scroll_y = self.GetViewStart()
-        scroll_y_px = scroll_y * self.GetScrollPixelsPerUnit()[1]
-
-        i0, y_into = self._index.find_row_at_y(scroll_y_px)
+        sx, sy = self.GetViewStart()
+        sy_px = sy * self.GetScrollPixelsPerUnit()[1]
+        i0, y_into = self._index.find_row_at_y(sy_px)
 
         if 0 <= i0 < len(self._rows):
-            y = paint_rows(self, gc, first_idx=i0, y0=-y_into, max_h=ch)
+            y = paint_rows(self, gc, i0, -y_into, ch)
         else:
             y = 0
 
-        # Fill any remaining space below content
         if y < ch:
             w = self.GetClientSize().width
-            bg = self.GetBackgroundColour()
-            if not bg.IsOk():
-                bg = wx.Colour(246, 252, 246)
+            bg = self.GetBackgroundColour() or wx.Colour(246, 252, 246)
             gc.SetBrush(wx.Brush(bg))
             gc.SetPen(wx.Pen(bg))
             gc.DrawRectangle(self.DATE_COL_W, y, max(0, w - self.DATE_COL_W), ch - y)
 
-    # ------------------ event handlers ------------------
+    # ------------------------------------------------------------------ #
+    # event dispatch
+    # ------------------------------------------------------------------ #
 
-    def _on_left_down(self, evt: wx.MouseEvent):
+    def _on_left_down(self, evt):  # same handlers as before
         if handle_left_down(self, evt):
             return
         evt.Skip()
 
-    def _on_left_up(self, evt: wx.MouseEvent):
+    def _on_left_up(self, evt):
         if handle_left_up(self, evt):
             return
         evt.Skip()
 
-    def _on_motion(self, evt: wx.MouseEvent):
+    def _on_motion(self, evt):
         if handle_motion(self, evt):
             return
         evt.Skip()
 
-    def _on_left_dclick(self, evt: wx.MouseEvent):
+    def _on_left_dclick(self, evt):
         if handle_left_dclick(self, evt):
             return
         evt.Skip()
 
-    def _on_mousewheel(self, evt: wx.MouseEvent):
+    def _on_mousewheel(self, evt):
         if handle_mousewheel(self, evt):
             return
         evt.Skip()
 
-    def _on_char(self, evt: wx.KeyEvent):
+    def _on_char(self, evt):
         if handle_key_event(self, evt):
             return
         evt.Skip()
 
+    # ------------------------------------------------------------------ #
+    # handle resize – invalidate only layout_data
+    # ------------------------------------------------------------------ #
+
     def _on_size(self, _evt: wx.SizeEvent):
-        """Handle window resize - invalidate wrap cache and rebuild layout."""
-        w = self.GetClientSize().width
-        if w != self._wrap_cache_w:
-            self._wrap_cache_w = w
-
-            # Invalidate wrap cache for all rows
-            for r in self._rows:
-                r.cache.pop("_wrap_w", None)
-                r.cache.pop("_wrap_h", None)
-                r.cache.pop("_wrap_lines", None)
-                r.cache.pop("_wrap_src", None)
-
-            # Rebuild layout index with new wrap width
+        new_w = self.GetClientSize().width
+        if new_w != self._last_client_w:
+            self._last_client_w = new_w
+            self.cache.invalidate_layout_only()
             self._index.rebuild(self, self._rows)
-
-            # Update virtual size
-            total_height = self._index.content_height() if self._rows else 0
-            self.SetVirtualSize((-1, total_height))
-
+            self.SetVirtualSize((-1, self._index.content_height()))
             self.Refresh(False)
-
         _evt.Skip()
 
-    # ------------------ public API ------------------
+    # ------------------------------------------------------------------ #
+    # public API
+    # ------------------------------------------------------------------ #
 
     def set_root(self, root_id: str):
-        """Change the root entry and rebuild the view."""
         self.root_id = root_id
         self.invalidate_cache()
         self.rebuild()
 
     def current_entry_id(self) -> Optional[str]:
-        """Return the currently selected entry ID."""
-        if 0 <= self._sel < len(self._rows):
-            return self._rows[self._sel].entry_id
-        return None
+        return self._rows[self._sel].entry_id if 0 <= self._sel < len(self._rows) else None
 
     def select_entry(self, entry_id: str, ensure_visible: bool = True) -> bool:
-        """Select an entry by ID."""
-        return select_entry_id(self, entry_id, ensure_visible=ensure_visible)
+        return select_entry_id(self, entry_id, ensure_visible)
 
-    # Placeholder methods for NotePanel compatibility
-    def edit_entry(self, _entry_id: str) -> bool:
-        """Edit entry - not implemented in display-only view."""
+    # dummy stubs for NotePanel
+    def edit_entry(self, _eid: str) -> bool:
         return False
 
-    def edit_block(self, _block_id: str) -> bool:
-        """Edit block - not implemented in display-only view."""
+    def edit_block(self, _bid: str) -> bool:
         return False
