@@ -27,7 +27,7 @@ class IOWorker:
                 result = fn(*args, **kwargs)
             except Exception as e:
                 err = (e, traceback.format_exc())
-            
+
             if cb:
                 wx.CallAfter(cb, result, err)
             elif err is not None:

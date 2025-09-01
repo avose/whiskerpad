@@ -8,6 +8,7 @@ from ui.scroll import soft_ensure_visible
 from ui.select import select_row
 from ui.cursor import char_pos_from_pixel
 from ui.notebook_text import rich_text_from_entry
+from ui.edit_state import find_word_boundaries
 from core.tree_utils import toggle_collapsed
 
 
@@ -116,11 +117,28 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
     row = view._rows[idx]
 
     # ---------- caret gutter click ----------
-    if caret_hit(view, row, rect, pos) and has_children(view, row):
-        if view._edit_state.active:
-            view.exit_edit_mode(save=True)
-        view.toggle_collapsed_fast(row.entry_id)
-        return True
+    if caret_hit(view, row, rect, pos):
+        if has_children(view, row):
+            # Has children - toggle collapse/expand as usual
+            if view._edit_state.active:
+                view.exit_edit_mode(save=True)
+            view.toggle_collapsed_fast(row.entry_id)
+            old_sel = view._sel
+            view._sel = idx
+            if old_sel != idx:
+                view.Refresh()
+            view.SetFocus()
+            return True
+        else:
+            # No children - just select the row, don't start editing
+            if view._edit_state.active:
+                view.exit_edit_mode(save=True)
+            old_sel = view._sel
+            view._sel = idx
+            if old_sel != idx:
+                view.Refresh()
+            view.SetFocus()
+            return True
 
     # ---------- check if this is an image-token row ----------
     layout = view.cache.layout(row.entry_id) or {}
@@ -141,10 +159,18 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
 
     if view._edit_state.active and view._edit_state.row_idx == idx:
         view.set_cursor_position(char_pos)
+        view._edit_state.clear_selection()  # Clear selection on single click
+        # Prepare for potential drag
+        view._drag_start_pos = char_pos
+        view._is_dragging = False
     else:
         if old_sel != idx and old_sel >= 0:
-            view.Refresh()  # clear old highlight
+            view.Refresh() # clear old highlight
         view.enter_edit_mode(idx, char_pos)
+        # Prepare for potential drag
+        view._drag_start_pos = char_pos
+        view._is_dragging = False
+
     view.SetFocus()
     return True
 
@@ -152,26 +178,81 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
 def handle_left_dclick(view, evt: wx.MouseEvent) -> bool:
     pos = evt.GetPosition()
     idx = row_at_window_y(view, pos.y)
+
     if idx < 0 or idx >= len(view._rows):
         return False
 
     row = view._rows[idx]
-    if has_children(view, row):
+    rect = item_rect(view, idx)
+
+    # ---------- caret gutter double-click → toggle collapse ----------
+    if caret_hit(view, row, rect, pos) and has_children(view, row):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
-        toggle_collapsed(view.nb_dir, row.entry_id)
-        view.invalidate_cache(row.entry_id)
-        view.rebuild()
+        view.toggle_collapsed_fast(row.entry_id)
         return True
+
+    # ---------- text area double-click → word selection ----------
+    # Check if this is a text row (not image)
+    layout = view.cache.layout(row.entry_id) or {}
+    if layout.get("is_img"):
+        return False
+
+    # Get character position of double-click
+    char_pos = char_pos_from_click(view, idx, pos)
+
+    # Enter edit mode if not already editing this row
+    if not view._edit_state.active or view._edit_state.row_idx != idx:
+        view.enter_edit_mode(idx, char_pos)
+
+    # Select word at click position
+    if view._edit_state.active and view._edit_state.rich_text:
+        plain_text = view._edit_state.rich_text.to_plain_text()
+        start, end = find_word_boundaries(plain_text, char_pos)
+        view._edit_state.set_selection(start, end)
+        view._edit_state.cursor_pos = end  # Position cursor at end of selection
+        view._refresh_edit_row()
+
+    return True
+
+
+# Implement handle_motion() for drag selection:
+def handle_motion(view, evt: wx.MouseEvent) -> bool:
+    if not evt.LeftIsDown() or not view._edit_state.active:
+        return False
+
+    if hasattr(view, '_drag_start_pos') and view._drag_start_pos is not None:
+        pos = evt.GetPosition()
+        idx = row_at_window_y(view, pos.y)
+
+        if idx == view._edit_state.row_idx:
+            char_pos = char_pos_from_click(view, idx, pos)
+
+            if not view._is_dragging and abs(char_pos - view._drag_start_pos) > 0:
+                view._is_dragging = True
+
+            if view._is_dragging:
+                # Create/extend selection
+                view._edit_state.set_selection(view._drag_start_pos, char_pos)
+                view._edit_state.cursor_pos = char_pos
+                view._refresh_edit_row()
+                return True
+
     return False
 
 
+# Implement handle_left_up() to complete drag:
 def handle_left_up(view, evt: wx.MouseEvent) -> bool:
-    return False  # placeholder
+    if hasattr(view, '_is_dragging') and view._is_dragging:
+        view._is_dragging = False
+        view._drag_start_pos = None
+        return True
 
+    # Clean up drag state
+    if hasattr(view, '_drag_start_pos'):
+        view._drag_start_pos = None
 
-def handle_motion(view, evt: wx.MouseEvent) -> bool:
-    return False  # placeholder
+    return False
 
 
 def handle_mousewheel(view, evt: wx.MouseEvent) -> bool:

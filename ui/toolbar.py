@@ -6,13 +6,24 @@ from ui.icons import wpIcons
 from ui.file_dialogs import choose_image_files
 
 
-class TopToolbar(wx.Panel):
+class Toolbar(wx.Panel):
     """
-    Simple top toolbar with a vertical gradient background and buttons.
+    Simple toolbar with a vertical gradient background and buttons.
     Buttons: Open Notebook, Add Child, Text Color, Background Color.
     """
 
-    def __init__(self, parent: wx.Window, on_open, on_add_images, on_fg_color=None, on_bg_color=None):
+    def __init__(
+            self,
+            parent: wx.Window,
+            on_open,
+            on_add_images,
+            on_fg_color,
+            on_bg_color,
+            on_copy,
+            on_paste,
+            on_cut,
+            on_delete,
+    ):
         super().__init__(parent, style=wx.BORDER_NONE)
 
         # Store callbacks
@@ -20,6 +31,10 @@ class TopToolbar(wx.Panel):
         self._on_add_images = on_add_images
         self._on_fg_color = on_fg_color
         self._on_bg_color = on_bg_color
+        self._on_copy = on_copy
+        self._on_paste = on_paste
+        self._on_cut = on_cut
+        self._on_delete = on_delete
 
         # Initialize UI components
         self._setup_painting()
@@ -42,7 +57,13 @@ class TopToolbar(wx.Panel):
         # Main action buttons
         self.btn_open = self._create_icon_button("book_add", "Open Notebook")
         self.btn_add_images = self._create_icon_button("image_add", "Add Image(s)")
-        
+        self.btn_delete = self._create_icon_button("delete", "Delete")
+
+        # Clipboard buttons
+        self.btn_copy = self._create_icon_button("page_white_copy", "Copy")
+        self.btn_paste = self._create_icon_button("paste_plain", "Paste")
+        self.btn_cut = self._create_icon_button("cut", "Cut")
+
         # Color picker sections
         self.fg_section = self._create_fg_color_section()
         self.bg_section = self._create_bg_color_section()
@@ -50,7 +71,6 @@ class TopToolbar(wx.Panel):
     def _create_icon_button(self, icon_name: str, tooltip: str):
         """Create a standard icon button"""
         bmp = wpIcons.Get(icon_name)
-        
         if bmp and bmp.IsOk():
             btn = wx.BitmapButton(self, bitmap=bmp, style=wx.BU_EXACTFIT | wx.NO_BORDER)
         else:
@@ -60,6 +80,7 @@ class TopToolbar(wx.Panel):
             tooltip += " (icon missing)"
 
         btn.SetToolTip(wx.ToolTip(tooltip))
+        btn.SetCanFocus(False)  # Prevent button from stealing focus
         return btn
 
     def _create_fg_color_section(self):
@@ -78,7 +99,7 @@ class TopToolbar(wx.Panel):
 
         # Create color picker
         self.fg_color_picker = wx.ColourPickerCtrl(
-            self, 
+            self,
             colour=wx.Colour(0, 0, 0),  # Black default
             size=wx.Size(32, 20),  # Keep it small
             style=wx.CLRP_DEFAULT_STYLE
@@ -88,7 +109,7 @@ class TopToolbar(wx.Panel):
         # Add to section sizer
         section_sizer.Add(fg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.fg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-        
+
         return section_sizer
 
     def _create_bg_color_section(self):
@@ -117,7 +138,7 @@ class TopToolbar(wx.Panel):
         # Add to section sizer
         section_sizer.Add(bg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.bg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-        
+
         return section_sizer
 
     def _setup_layout(self):
@@ -128,11 +149,16 @@ class TopToolbar(wx.Panel):
         main_sizer.AddSpacer(2)
         main_sizer.Add(self.btn_open, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.btn_add_images, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_delete, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
 
-        # Separator before color controls
-        #main_sizer.AddSpacer(8)
+        # Clipboard buttons
+        main_sizer.AddSpacer(6)  # Small separator
+        main_sizer.Add(self.btn_cut, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_copy, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_paste, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
 
         # Color picker sections
+        main_sizer.AddSpacer(6)  # Small separator
         main_sizer.Add(self.fg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.bg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
 
@@ -145,9 +171,15 @@ class TopToolbar(wx.Panel):
     def _bind_events(self):
         """Bind all event handlers"""
         # Button events
-        self.btn_open.Bind(wx.EVT_BUTTON, lambda evt: self._on_open())
+        self.btn_open.Bind(wx.EVT_BUTTON, lambda evt: self._on_open(evt))
         self.btn_add_images.Bind(wx.EVT_BUTTON, lambda evt: self._on_add_images_click())
-        
+        self.btn_delete.Bind(wx.EVT_BUTTON, lambda evt: self._on_delete(evt))
+
+        # Clipboard button events
+        self.btn_copy.Bind(wx.EVT_BUTTON, lambda evt: self._on_copy(evt) if self._on_copy else None)
+        self.btn_paste.Bind(wx.EVT_BUTTON, lambda evt: self._on_paste(evt) if self._on_paste else None)
+        self.btn_cut.Bind(wx.EVT_BUTTON, lambda evt: self._on_cut(evt) if self._on_cut else None)
+
         # Color picker events
         self.fg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_fg_color_changed)
         self.bg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_bg_color_changed)

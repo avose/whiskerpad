@@ -27,74 +27,74 @@ def _atomic_write_json(p: Path, obj: Dict[str, Any]) -> None:
     finally:
         os.close(dir_fd)
 
-def nb_paths(nb_dir: str):
-    nb = Path(nb_dir).expanduser().resolve()
+def notebook_paths(notebook_dir: str):
+    notebook_path = Path(notebook_dir).expanduser().resolve()
     return {
-        "root": nb,
-        "notebook_json": nb / "notebook.json",
-        "entries": nb / "entries",
-        "trash": nb / "_trash",
-        "cache": nb / "_cache",
+        "root": notebook_path,
+        "notebook_json": notebook_path / "notebook.json",
+        "entries": notebook_path / "entries",
+        "trash": notebook_path / "_trash",
+        "cache": notebook_path / "_cache",
     }
 
 # ---------- notebook.json ----------
 
-def load_notebook(nb_dir: str) -> Dict[str, Any]:
-    p = nb_paths(nb_dir)
-    meta = _read_json(p["notebook_json"], {})
-    if not meta:
-        raise ValueError(f"notebook.json not found in {nb_dir}")
-    return meta
+def load_notebook(notebook_dir: str) -> Dict[str, Any]:
+    paths = notebook_paths(notebook_dir)
+    metadata = _read_json(paths["notebook_json"], {})
+    if not metadata:
+        raise ValueError(f"notebook.json not found in {notebook_dir}")
+    return metadata
 
-def save_notebook(nb_dir: str, meta: Dict[str, Any]) -> None:
-    p = nb_paths(nb_dir)
-    _atomic_write_json(p["notebook_json"], meta)
+def save_notebook(notebook_dir: str, metadata: Dict[str, Any]) -> None:
+    paths = notebook_paths(notebook_dir)
+    _atomic_write_json(paths["notebook_json"], metadata)
 
-def get_root_ids(nb_dir: str) -> List[str]:
-    return list(load_notebook(nb_dir).get("root_ids", []))
+def get_root_ids(notebook_dir: str) -> List[str]:
+    return list(load_notebook(notebook_dir).get("root_ids", []))
 
-def set_root_ids(nb_dir: str, ids: List[str]) -> None:
-    meta = load_notebook(nb_dir)
-    meta["root_ids"] = list(ids)
-    save_notebook(nb_dir, meta)
+def set_root_ids(notebook_dir: str, ids: List[str]) -> None:
+    metadata = load_notebook(notebook_dir)
+    metadata["root_ids"] = list(ids)
+    save_notebook(notebook_dir, metadata)
 
 # ---------- entries/<shard>/<id>/entry.json ----------
 
 def _new_id() -> str:
     return uuid.uuid4().hex[:12]
 
-def entry_dir(nb_dir: str, entry_id: str) -> Path:
+def entry_dir(notebook_dir: str, entry_id: str) -> Path:
     """
     Strict sharded layout:
     entries/<first_2_chars>/<entry_id>/
     """
-    base = nb_paths(nb_dir)["entries"]
+    base = notebook_paths(notebook_dir)["entries"]
     return base / entry_id[:2] / entry_id
 
-def entry_json_path(nb_dir: str, entry_id: str) -> Path:
-    return entry_dir(nb_dir, entry_id) / "entry.json"
+def entry_json_path(notebook_dir: str, entry_id: str) -> Path:
+    return entry_dir(notebook_dir, entry_id) / "entry.json"
 
-def create_node(nb_dir: str, parent_id: Optional[str] = None, title: str = "",
+def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str = "",
                 insert_index: Optional[int] = None) -> str:
     """
     Create a new node with rich text format.
     If parent_id is None, append to notebook.root_ids.
     Otherwise, append a {'type':'child','id': new_id} into parent's items (or at insert_index).
-    
+
     Returns new entry_id.
     """
     eid = _new_id()
-    d = entry_dir(nb_dir, eid)
+    d = entry_dir(notebook_dir, eid)
     d.mkdir(parents=True, exist_ok=True)
 
     now = int(time.time())
-    
+
     # Rich text format with single "text" field - start empty if no title given
     if title:
         text_content = [{"content": title}]
     else:
         text_content = [{"content": ""}]  # Empty but still valid rich text structure
-    
+
     entry = {
         "id": eid,
         "text": text_content,
@@ -110,68 +110,78 @@ def create_node(nb_dir: str, parent_id: Optional[str] = None, title: str = "",
     _atomic_write_json(d / "entry.json", entry)
     if parent_id is None:
         # Add to root_ids
-        ids = get_root_ids(nb_dir)
+        ids = get_root_ids(notebook_dir)
         ids.append(eid)
-        set_root_ids(nb_dir, ids)
+        set_root_ids(notebook_dir, ids)
     else:
         # Add to parent's items
-        parent = load_entry(nb_dir, parent_id)
+        parent = load_entry(notebook_dir, parent_id)
         child_item = {"type": "child", "id": eid}
         if insert_index is None or insert_index < 0 or insert_index > len(parent["items"]):
             parent["items"].append(child_item)
         else:
             parent["items"].insert(insert_index, child_item)
-        save_entry(nb_dir, parent)
+        save_entry(notebook_dir, parent)
 
     return eid
 
-def load_entry(nb_dir: str, entry_id: str) -> Dict[str, Any]:
-    p = entry_json_path(nb_dir, entry_id)
-    if not p.exists():
+def load_entry(notebook_dir: str, entry_id: str) -> Dict[str, Any]:
+    paths = entry_json_path(notebook_dir, entry_id)
+    if not paths.exists():
         raise ValueError(f"entry.json for id={entry_id} not found")
-    return _read_json(p, {})
+    return _read_json(paths, {})
 
-def save_entry(nb_dir: str, entry: Dict[str, Any]) -> None:
+def save_entry(notebook_dir: str, entry: Dict[str, Any]) -> None:
     entry["updated_ts"] = int(time.time())
-    p = entry_json_path(nb_dir, entry["id"])
-    _atomic_write_json(p, entry)
+    paths = entry_json_path(notebook_dir, entry["id"])
+    _atomic_write_json(paths, entry)
 
 # ---------- Rich Text Utilities ----------
 
-def get_entry_rich_text(nb_dir: str, entry_id: str) -> List[Dict[str, Any]]:
+def get_entry_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str, Any]]:
     """Get the rich text content of an entry."""
-    entry = load_entry(nb_dir, entry_id)
+    entry = load_entry(notebook_dir, entry_id)
     return entry.get("text", [{"content": ""}])
 
-def set_entry_rich_text(nb_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
+def set_entry_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Set the rich text content of an entry."""
-    entry = load_entry(nb_dir, entry_id)
+    entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
     entry["edit"] = ""  # Clear edit field when setting final text
-    save_entry(nb_dir, entry)
+    save_entry(notebook_dir, entry)
 
-def get_entry_edit_text(nb_dir: str, entry_id: str) -> str:
-    """Get the temporary edit text of an entry."""
-    entry = load_entry(nb_dir, entry_id)
-    return entry.get("edit", "")
+def get_entry_edit_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str, Any]]:
+    """Get the temporary edit rich text of an entry."""
+    entry = load_entry(notebook_dir, entry_id)
+    edit_data = entry.get("edit", [])
 
-def set_entry_edit_text(nb_dir: str, entry_id: str, edit_text: str) -> None:
-    """Set the temporary edit text of an entry (auto-saved during editing)."""
-    entry = load_entry(nb_dir, entry_id)
-    entry["edit"] = edit_text
+    # Handle legacy plain text edit fields
+    if isinstance(edit_data, str):
+        if edit_data:
+            return [{"content": edit_data}]
+        else:
+            return [{"content": ""}]
+
+    # Return rich text format
+    return edit_data if edit_data else [{"content": ""}]
+
+def set_entry_edit_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
+    """Set the temporary edit rich text of an entry (auto-saved during editing)."""
+    entry = load_entry(notebook_dir, entry_id)
+    entry["edit"] = rich_text
     entry["last_edit_ts"] = int(time.time())
-    save_entry(nb_dir, entry)
+    save_entry(notebook_dir, entry)
 
-def commit_entry_edit(nb_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
-    """Commit edit text to final text and clear edit field."""
-    entry = load_entry(nb_dir, entry_id)
+def commit_entry_edit(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
+    """Commit edit rich text to final text and clear edit field."""
+    entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
-    entry["edit"] = ""
+    entry["edit"] = []  # Clear edit field (now empty rich text array)
     entry["last_edit_ts"] = int(time.time())
-    save_entry(nb_dir, entry)
+    save_entry(notebook_dir, entry)
 
-def cancel_entry_edit(nb_dir: str, entry_id: str) -> None:
+def cancel_entry_edit(notebook_dir: str, entry_id: str) -> None:
     """Cancel editing by clearing the edit field."""
-    entry = load_entry(nb_dir, entry_id)
-    entry["edit"] = ""
-    save_entry(nb_dir, entry)
+    entry = load_entry(notebook_dir, entry_id)
+    entry["edit"] = []  # Clear edit field (now empty rich text array)
+    save_entry(notebook_dir, entry)

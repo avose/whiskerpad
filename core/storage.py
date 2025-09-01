@@ -11,7 +11,7 @@ NOTEBOOK_VERSION = 2
 def ensure_notebook(target_dir: str, name: str | None = None) -> Dict[str, Any]:
     """
     Create or load a notebook directory.
-    
+
     Structure:
     <target_dir>/
       notebook.json
@@ -55,5 +55,5 @@ def ensure_notebook(target_dir: str, name: str | None = None) -> Dict[str, Any]:
         os.fsync(f.fileno())
 
     tmp.replace(nb_json)
-    
+
     return {"path": str(p), "created": True, "name": meta["name"]}

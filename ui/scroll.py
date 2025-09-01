@@ -4,6 +4,9 @@ import wx
 
 from ui.layout import measure_row_height
 
+# Scroll behavior constants
+SCROLL_MARGIN = 0  # Pixels to leave at edge when scrolling
+
 def visible_range(view) -> tuple[int, int]:
     """
     Return (first, last) fully visible row indices.
@@ -16,23 +19,23 @@ def visible_range(view) -> tuple[int, int]:
     # Get scroll position from ScrolledWindow
     scroll_x, scroll_y = view.GetViewStart()
     scroll_y_px = scroll_y * view.GetScrollPixelsPerUnit()[1]
-    
-    i0, y_into = view._index.find_row_at_y(scroll_y_px)
-    if i0 < 0:
+
+    start_idx, y_into = view._index.find_row_at_y(scroll_y_px)
+    if start_idx < 0:
         return (0, -1)
 
-    ch = view.GetClientSize().height
+    client_height = view.GetClientSize().height
     y = -int(y_into)
-    i = int(i0)
-    last = i - 1
+    current_idx = int(start_idx)
+    last = current_idx - 1
 
-    while i < n and y < ch:
-        h = int(measure_row_height(view, view._rows[i]))
+    while current_idx < n and y < client_height:
+        h = int(measure_row_height(view, view._rows[current_idx]))
         y += h
-        last = i
-        i += 1
+        last = current_idx
+        current_idx += 1
 
-    return (int(i0), min(last, n - 1))
+    return (int(start_idx), min(last, n - 1))
 
 def soft_ensure_visible(view, idx: int) -> None:
     """Ensure idx is visible using pixel-based scrolling."""
@@ -53,7 +56,7 @@ def soft_ensure_visible(view, idx: int) -> None:
     # Get current scroll position
     scroll_x, scroll_y = view.GetViewStart()
     cur = scroll_y * view.GetScrollPixelsPerUnit()[1]
-    
+
     bottom = top + h
 
     # If above, scroll up to top; if below, scroll so bottom fits;

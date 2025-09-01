@@ -62,7 +62,7 @@ def _store_image_layout(
 ) -> None:
     """Compute scaled thumbnail metrics and cache them."""
     try:
-        bmp_dir = entry_dir(view.nb_dir, row.entry_id)
+        bmp_dir = entry_dir(view.notebook_dir, row.entry_id)
         _bmp, tw, th = load_thumb_bitmap(bmp_dir, fname)
 
         # scale down to fit width (never scale up)

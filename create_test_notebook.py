@@ -16,7 +16,7 @@ def get_fortune_text():
             return result.stdout.strip()
     except (subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired):
         pass
-    
+
     # Fallback to simple random phrases if fortune not available
     fallback_texts = [
         "The early bird catches the worm.",

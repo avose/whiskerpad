@@ -7,12 +7,12 @@ from ui.layout import ensure_wrap_cache, measure_row_height
 def paint_background(view, gc: wx.GraphicsContext, client_h: int) -> None:
     """Fill full client area and the date gutter with background colors."""
     w = view.GetClientSize().width
-    
+
     # Main background
     bg = view.GetBackgroundColour()
     if not bg.IsOk():
         bg = wx.Colour(246, 252, 246)  # fallback
-    
+
     gc.SetBrush(wx.Brush(bg))
     gc.SetPen(wx.Pen(bg))
     gc.DrawRectangle(0, 0, w, client_h)
@@ -40,12 +40,12 @@ def paint_rows(view, gc: wx.GraphicsContext, first_idx: int, y0: int, max_h: int
         r = view._rows[i]
         h = measure_row_height(view, r)
         rect = wx.Rect(0, y, w, h)
-        
+
         ensure_wrap_cache(view, r)
         e = view._get(r.entry_id)
-        
+
         view._row_painter.draw(gc, rect, r, e, selected=(i == view._sel))
-        
+
         y += h
         i += 1
 

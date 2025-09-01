@@ -4,14 +4,14 @@ from ui.view import GCView as NotebookView
 
 class NotePanel(wx.Panel):
     """Mixed viewer: node rows with inline carets + interleaved rich blocks."""
-    def __init__(self, parent: wx.Window, nb_dir: str, entry_id: str, on_image_drop=None):
+    def __init__(self, parent: wx.Window, notebook_dir: str, entry_id: str, on_image_drop=None):
         super().__init__(parent)
-        self.nb_dir = nb_dir
+        self.notebook_dir = notebook_dir
         self.root_id = entry_id
 
         s = wx.BoxSizer(wx.VERTICAL)
         # Pass the callback through to the view
-        self.view = NotebookView(self, nb_dir, entry_id, on_image_drop=on_image_drop)
+        self.view = NotebookView(self, notebook_dir, entry_id, on_image_drop=on_image_drop)
         s.Add(self.view, 1, wx.EXPAND | wx.ALL, 6)
         self.SetSizer(s)
 

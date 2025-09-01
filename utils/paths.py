@@ -52,51 +52,65 @@ _SPACE_RE = re.compile(r"\s+")
 _SAFE_CHAR_RE = re.compile(r"[^A-Za-z0-9._-]")  # conservative, portable
 
 
-def sanitize_basename(pathlike: Pathish, *, max_len: int = 120) -> str:
-    """
-    Return a safe basename for storing inside an entry directory.
-    Rules:
-      - take only the basename (strip any directories)
-      - normalize unicode to NFKC
-      - collapse whitespace to single underscore
-      - remove path separators and disallow weird chars -> replace with underscore
-      - enforce a conservative character set [A-Za-z0-9._-]
-      - limit length to `max_len` (preserving extension when possible)
-    """
-    # 1) basename only
-    s = os.path.basename(str(pathlike)).strip()
-    # Windows drive letter edge-case: os.path.basename("C:\\") == "C:\\"
-    s = s.replace("\\", "/")
-    s = os.path.basename(s)
-    if not s:
-        s = "file"
+def _normalize_unicode_and_whitespace(text: str) -> str:
+    """Normalize unicode and collapse whitespace to underscores."""
+    text = unicodedata.normalize("NFKC", text)
+    return _SPACE_RE.sub("_", text)
 
-    # 2) normalize unicode
-    s = unicodedata.normalize("NFKC", s)
 
-    # 3) spaces -> underscore
-    s = _SPACE_RE.sub("_", s)
+def _apply_safe_character_restrictions(text: str) -> str:
+    """Apply conservative character set restrictions."""
+    text = text.replace("/", "_")
+    return _SAFE_CHAR_RE.sub("_", text)
 
-    # 4) drop any remaining path separators just in case
-    s = s.replace("/", "_")
 
-    # 5) conservative allowed set; others -> underscore
-    s = _SAFE_CHAR_RE.sub("_", s)
+def _truncate_preserving_extension(text: str, max_len: int) -> str:
+    """Truncate text while trying to preserve file extension."""
+    stem, dot, ext = text.partition(".") if text.count(".") == 1 else (text, "", "")
 
-    # 6) enforce max length, try to keep extension
-    stem, dot, ext = s.partition(".") if s.count(".") == 1 else (s, "", "")
     if ext:
         ext = "." + ext  # restore leading dot
         base_max = max(1, max_len - len(ext))
         stem = stem[:base_max]
-        s = stem + ext
+        result = stem + ext
     else:
-        s = s[:max_len]
+        result = text[:max_len]
 
     # Avoid empty stems
-    if s in ("", ".", ".."):
-        s = "file"
-    return s
+    if result in ("", ".", ".."):
+        result = "file"
+
+    return result
+
+
+def sanitize_basename(pathlike: Pathish, *, max_len: int = 120) -> str:
+    """
+    Return a safe basename for storing inside an entry directory.
+
+    Rules:
+    - take only the basename (strip any directories)
+    - normalize unicode and collapse whitespace
+    - apply conservative character set restrictions
+    - limit length preserving extension when possible
+    """
+    # 1) basename only
+    text = os.path.basename(str(pathlike)).strip()
+
+    # Windows drive letter edge-case: os.path.basename("C:\\") == "C:\\"
+    text = text.replace("\\", "/")
+    text = os.path.basename(text)
+
+    if not text:
+        text = "file"
+
+    # 2-3) normalize unicode and whitespace
+    text = _normalize_unicode_and_whitespace(text)
+
+    # 4-5) apply safe character restrictions
+    text = _apply_safe_character_restrictions(text)
+
+    # 6) truncate while preserving extension
+    return _truncate_preserving_extension(text, max_len)
 
 
 def new_uuid() -> str:

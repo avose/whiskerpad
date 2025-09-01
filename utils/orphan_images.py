@@ -13,6 +13,13 @@ __all__ = [
     "cleanup_orphans",
 ]
 
+
+def _extract_uuid_from_filename(filename: str, pattern: re.Pattern) -> str | None:
+    """Extract UUID from filename using the given regex pattern."""
+    match = pattern.match(filename)
+    return match.group("uuid") if match else None
+
+
 # UUID is 32 lowercase hex from our filename scheme.
 UUID_RE = r"(?P<uuid>[0-9a-f]{32})"
 IMAGE_EXT = r"(?:png|jpg|jpeg|gif|webp|bmp|tif|tiff)"
@@ -21,14 +28,12 @@ IMG_FILE_RE = re.compile(rf"^{UUID_RE}_.+?\.{IMAGE_EXT}$")
 THUMB_RE = re.compile(rf"^{UUID_RE}_thumb\.jpg$")
 
 
-def _uuid_of_image_filename(fname: str) -> str | None:
-    m = IMG_FILE_RE.match(fname)
-    return m.group("uuid") if m else None
+def _uuid_of_image_filename(filename: str) -> str | None:
+    return _extract_uuid_from_filename(filename, IMG_FILE_RE)
 
 
-def _uuid_of_thumb(fname: str) -> str | None:
-    m = THUMB_RE.match(fname)
-    return m.group("uuid") if m else None
+def _uuid_of_thumb(filename: str) -> str | None:
+    return _extract_uuid_from_filename(filename, THUMB_RE)
 
 
 def find_orphans(entry_dir: Pathish, entry_text: str) -> Tuple[Set[str], Set[str]]:
@@ -49,19 +54,19 @@ def find_orphans(entry_dir: Pathish, entry_text: str) -> Tuple[Set[str], Set[str
     imgs_to_delete: Set[str] = set()
     thumbs_to_delete: Set[str] = set()
 
-    for p in d.iterdir():
-        if not p.is_file():
+    for path in d.iterdir():
+        if not path.is_file():
             continue
-        fname = p.name
-        u_img = _uuid_of_image_filename(fname)
+        filename = path.name
+        u_img = _uuid_of_image_filename(filename)
         if u_img is not None:
-            if fname not in ref_images:
-                imgs_to_delete.add(fname)
+            if filename not in ref_images:
+                imgs_to_delete.add(filename)
             continue
-        u_th = _uuid_of_thumb(fname)
+        u_th = _uuid_of_thumb(filename)
         if u_th is not None:
             if u_th not in ref_image_uuids:
-                thumbs_to_delete.add(fname)
+                thumbs_to_delete.add(filename)
             continue
         # Other files (entry.json, temp files, etc.) are ignored.
 
@@ -81,12 +86,12 @@ def cleanup_orphans(entry_dir: Pathish, entry_text: str, *, dry_run: bool = Fals
     errors: List[str] = []
 
     if not dry_run:
-        for fname in list(imgs_to_delete) + list(thumbs_to_delete):
+        for filename in list(imgs_to_delete) + list(thumbs_to_delete):
             try:
-                (d / fname).unlink(missing_ok=True)
-                deleted.append(fname)
+                (d / filename).unlink(missing_ok=True)
+                deleted.append(filename)
             except Exception as e:
-                errors.append(f"{fname}: {e}")
+                errors.append(f"{filename}: {e}")
 
     # Report referenced items (kept)
     ref_images = sorted(list(referenced_images(entry_text)))

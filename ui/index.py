@@ -9,7 +9,7 @@ from ui.layout import measure_row_height
 class LayoutIndex:
     """
     Immutable per-build layout index of cumulative row offsets and heights.
-    
+
     - offsets[i] == pixel Y of the top of row i in content coordinates.
     - heights[i] == pixel height of row i.
     - total_height == sum(heights).
@@ -25,7 +25,7 @@ class LayoutIndex:
     def rebuild(self, view, rows: List[Row]) -> None:
         """
         Recompute offsets/heights using the current wrap width of `view`.
-        
+
         This is O(N) and should be called after:
         - rows change (flatten),
         - or the available text width changes (window resize).
@@ -61,7 +61,7 @@ class LayoutIndex:
     def find_row_at_y(self, y: int) -> Tuple[int, int]:
         """
         Given a content Y (0 = very top), return: (row_index, y_into_row)
-        
+
         If y is above first row, returns (0, y).
         If y is beyond end, returns (last_index, last_row_height-1) as a clamp.
         """
@@ -91,7 +91,6 @@ class LayoutIndex:
             return
 
         # Measure the new row
-        from ui.layout import measure_row_height
         new_height = measure_row_height(view, new_row)
 
         # Insert height at the correct position

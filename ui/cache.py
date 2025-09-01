@@ -9,7 +9,7 @@ from core.tree import (
     save_entry,
     commit_entry_edit,
     cancel_entry_edit,
-    set_entry_edit_text,
+    set_entry_edit_rich_text,
 )
 
 __all__ = ["NotebookCache"]
@@ -39,8 +39,8 @@ class NotebookCache:
     # construction / statistics
     # ------------------------------------------------------------------ #
 
-    def __init__(self, nb_dir: str) -> None:
-        self.nb_dir = nb_dir
+    def __init__(self, notebook_dir: str) -> None:
+        self.notebook_dir = notebook_dir
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._dirty: Set[str] = set()  # unsaved entry_data
 
@@ -54,11 +54,11 @@ class NotebookCache:
         """
         c = self._cache.setdefault(entry_id, {})
         if "entry_data" not in c:
-            c["entry_data"] = load_entry(self.nb_dir, entry_id)
+            c["entry_data"] = load_entry(self.notebook_dir, entry_id)
         return c["entry_data"]
 
-    def save_entry(self, entry: Dict[str, Any]) -> None:
-        save_entry(self.nb_dir, entry)
+    def save_entry_data(self, entry: Dict[str, Any]) -> None:
+        save_entry(self.notebook_dir, entry)
         self._cache.setdefault(entry["id"], {})["entry_data"] = entry
         self._dirty.discard(entry["id"])
 
@@ -135,15 +135,16 @@ class NotebookCache:
     # ------------------------------------------------------------------ #
 
     def commit_edit(self, entry_id: str, rich_text: list[dict]) -> None:
-        commit_entry_edit(self.nb_dir, entry_id, rich_text)
+        commit_entry_edit(self.notebook_dir, entry_id, rich_text)
         self.invalidate_entry(entry_id)
 
     def cancel_edit(self, entry_id: str) -> None:
-        cancel_entry_edit(self.nb_dir, entry_id)
+        cancel_entry_edit(self.notebook_dir, entry_id)
         self.invalidate_entry(entry_id)
 
-    def set_edit_text(self, entry_id: str, text: str) -> None:
-        set_entry_edit_text(self.nb_dir, entry_id, text)
+    def set_edit_rich_text(self, entry_id: str, rich_text: list[dict]) -> None:
+        """Set rich text in edit field during editing."""
+        set_entry_edit_rich_text(self.notebook_dir, entry_id, rich_text)
         self._dirty.add(entry_id)
 
     # ------------------------------------------------------------------ #

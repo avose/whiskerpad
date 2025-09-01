@@ -10,7 +10,6 @@ from typing import Dict, Any, List, Optional
 from core.tree import (
     commit_entry_edit,
     cancel_entry_edit,
-    set_entry_edit_text,
 )
 from core.tree_utils import (
     add_sibling_after,
@@ -22,7 +21,7 @@ from core.tree_utils import (
 from ui.cache import NotebookCache
 from ui.constants import INDENT_W, GUTTER_W, PADDING, DATE_COL_W, DEFAULT_ROW_H
 from ui.types import Row
-from ui.model import flatten_tree
+from ui.model import flatten_tree, update_tree_incremental
 from ui.layout import measure_row_height
 from ui.row import RowPainter, RowMetrics, caret_hit, item_rect
 from ui.select import select_entry_id
@@ -37,10 +36,10 @@ from ui.keys import handle_key_event
 from ui.paint import paint_background, paint_rows
 from ui.scroll import soft_ensure_visible, visible_range, clamp_scroll_y
 from ui.index import LayoutIndex
-
+from ui.drag_drop import ImageDropTarget
 from ui.edit_state import EditState, RichText
 from ui.notebook_text import rich_text_from_entry
-from ui.cursor import CursorRenderer  # only for selection outline
+from ui.cursor import CursorRenderer
 
 # =============================================================================
 class GCView(wx.ScrolledWindow):
@@ -53,14 +52,14 @@ class GCView(wx.ScrolledWindow):
     # construction
     # ------------------------------------------------------------------ #
 
-    def __init__(self, parent: wx.Window, nb_dir: str, root_id: str, on_image_drop=None):
+    def __init__(self, parent: wx.Window, notebook_dir: str, root_id: str, on_image_drop=None):
         super().__init__(parent, style=wx.BORDER_SIMPLE | wx.WANTS_CHARS)
 
-        self.nb_dir = nb_dir
+        self.notebook_dir = notebook_dir
         self.root_id = root_id
 
         # central cache
-        self.cache = NotebookCache(nb_dir)
+        self.cache = NotebookCache(notebook_dir)
 
         # flattened rows + selection
         self._rows: List[Row] = []
@@ -74,6 +73,10 @@ class GCView(wx.ScrolledWindow):
         self._cursor_renderer = CursorRenderer()
         self._cursor_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_cursor_blink)
+
+        # Selection state.
+        self._drag_start_pos = None
+        self._is_dragging = False
 
         # layout constants
         self.INDENT_W = INDENT_W
@@ -124,7 +127,6 @@ class GCView(wx.ScrolledWindow):
 
         # Set up drag & drop for images
         if on_image_drop:
-            from ui.drag_drop import ImageDropTarget
             drop_target = ImageDropTarget(self, on_image_drop)
             self.SetDropTarget(drop_target)
 
@@ -172,7 +174,7 @@ class GCView(wx.ScrolledWindow):
         prev_id = self.current_entry_id()
 
         self.cache.invalidate_all()
-        self._rows = flatten_tree(self.nb_dir, self.root_id)
+        self._rows = flatten_tree(self.notebook_dir, self.root_id)
         self._index.rebuild(self, self._rows)
 
         total_h = self._index.content_height() if self._rows else 0
@@ -214,21 +216,13 @@ class GCView(wx.ScrolledWindow):
     def _refresh_edit_row(self):
         if not self._edit_state.active:
             return
+
         row_rect = item_rect(self, self._edit_state.row_idx)
+        # Add a small buffer for cursor visibility
+        row_rect.height += 4
+        self._refresh_rect_area(row_rect, extend_to_bottom=False)
 
-        scroll_x, scroll_y = self.GetViewStart()
-        scroll_y_px = scroll_y * self.GetScrollPixelsPerUnit()[1]
-
-        window_rect = wx.Rect(
-            row_rect.x,
-            row_rect.y - scroll_y_px,
-            row_rect.width,
-            row_rect.height + 4,
-        )
-        if window_rect.y < self.GetClientSize().height and window_rect.Bottom > 0:
-            self.RefreshRect(window_rect)
-
-    # ------------- enter/exit edit -------------------------------------- #
+    # ------------ Edit mode management ------------
 
     def enter_edit_mode(self, row_idx: int, cursor_pos: int = 0):
         self._save_current_edit()
@@ -240,6 +234,7 @@ class GCView(wx.ScrolledWindow):
         rich_text = rich_text_from_entry(entry)
 
         self._edit_state.start_editing(row_idx, row.entry_id, rich_text, cursor_pos)
+        #self._edit_state.update_format_from_cursor()
         self._cursor_timer.Start(500)
         self._sel = row_idx
 
@@ -254,18 +249,18 @@ class GCView(wx.ScrolledWindow):
         self._cursor_timer.Stop()
 
         if save and final_rt and entry_id:
-            commit_entry_edit(self.nb_dir, entry_id, final_rt.to_storage())
+            commit_entry_edit(self.notebook_dir, entry_id, final_rt.to_storage())
         elif entry_id:
-            cancel_entry_edit(self.nb_dir, entry_id)
+            cancel_entry_edit(self.notebook_dir, entry_id)
 
         if entry_id:
             self.invalidate_cache(entry_id)
         self.Refresh()
 
     def _save_current_edit(self):
-        if self._edit_state.active and self._edit_state.entry_id:
-            plain = self._edit_state.get_plain_text()
-            set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
+        if self._edit_state.active and self._edit_state.entry_id and self._edit_state.rich_text:
+            rich_data = self._edit_state.rich_text.to_storage()
+            self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
 
     # used after each keystroke while editing
     def _invalidate_edit_row_cache(self):
@@ -299,11 +294,10 @@ class GCView(wx.ScrolledWindow):
     # ------------------------------------------------------------------ #
 
     def toggle_collapsed_fast(self, entry_id: str):
-        toggle_collapsed(self.nb_dir, entry_id)
+        toggle_collapsed(self.notebook_dir, entry_id)
         self.invalidate_subtree_cache(entry_id)
 
-        from ui.model import update_tree_incremental
-        self._rows = update_tree_incremental(self.nb_dir, self._rows, entry_id)
+        self._rows = update_tree_incremental(self.notebook_dir, self._rows, entry_id)
         self._index.rebuild(self, self._rows)
 
         self.SetVirtualSize((-1, self._index.content_height()))
@@ -345,36 +339,60 @@ class GCView(wx.ScrolledWindow):
     # partial refresh helpers
     # ------------------------------------------------------------------ #
 
+    def _refresh_rect_area(self, rect: wx.Rect, extend_to_bottom: bool = False):
+        """Common refresh logic for rectangular areas."""
+        client_size = self.GetClientSize()
+        scroll_x, scroll_y = self.GetViewStart()
+        scroll_y_px = scroll_y * self.GetScrollPixelsPerUnit()[1]
+
+        # Convert to window coordinates
+        window_y = rect.y - scroll_y_px
+
+        if extend_to_bottom:
+            height = client_size.height - window_y
+        else:
+            height = rect.height
+
+        if height > 0 and window_y < client_size.height:
+            refresh_rect = wx.Rect(0, max(0, window_y), client_size.width, height)
+            self.RefreshRect(refresh_rect)
+        else:
+            self.Refresh()
+
     def _refresh_from_row(self, start_idx: int):
+        """Refresh from the specified row to the bottom of the view."""
         if start_idx >= len(self._rows):
             return
+
         start_rect = item_rect(self, start_idx)
-        w, h = self.GetClientSize()
         if start_rect.IsEmpty():
             self.Refresh()
             return
-        sx, sy = self.GetViewStart()
-        sy_px = sy * self.GetScrollPixelsPerUnit()[1]
-        refresh_rect = wx.Rect(
-            0,
-            max(0, start_rect.y - sy_px),
-            w,
-            max(1, h - max(0, start_rect.y - sy_px)),
-        )
-        self.RefreshRect(refresh_rect)
+
+        self._refresh_rect_area(start_rect, extend_to_bottom=True)
+
+    def _refresh_from_row_downward(self, start_idx: int):
+        """Refresh from the specified row index to the bottom of the view."""
+        if start_idx < 0 or start_idx >= len(self._rows):
+            self.Refresh()
+            return
+
+        start_rect = item_rect(self, start_idx)
+        self._refresh_rect_area(start_rect, extend_to_bottom=True)
 
     def _refresh_changed_area(self, entry_id: str):
+        """Refresh the area for a specific entry."""
         idx = next((i for i, r in enumerate(self._rows) if r.entry_id == entry_id), -1)
         if idx < 0:
             self.Refresh()
             return
+
         rect = item_rect(self, idx)
-        w, h = self.GetClientSize()
-        if rect.IsEmpty() or w <= 0 or h <= 0:
+        if rect.IsEmpty():
             self.Refresh()
             return
-        refresh_rect = wx.Rect(0, max(0, rect.y), w, max(1, h - rect.y))
-        self.RefreshRect(refresh_rect)
+
+        self._refresh_rect_area(rect, extend_to_bottom=True)
 
     # ==========================================================================
     # keystroke-driven text edit helpers (unchanged except cache calls)
@@ -383,19 +401,37 @@ class GCView(wx.ScrolledWindow):
     def insert_text_at_cursor(self, text: str):
         if not self._edit_state.active:
             return
-        self._edit_state.insert_text(text)
-        plain = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
+
+        # Get current formatting and apply it to new text
+        current_format = self._edit_state.get_current_format()
+        self._edit_state.rich_text.insert_text(
+            self._edit_state.cursor_pos,
+            text,
+            formatting=current_format
+        )
+        self._edit_state.cursor_pos += len(text)
+
+        rich_data = self._edit_state.rich_text.to_storage()
+        self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
-        self._refresh_edit_row()
+
+        # Update virtual size
+        self.SetVirtualSize((-1, self._index.content_height()))
+
+        # If inserting newlines, refresh from this row downward
+        if '\n' in text:
+            self._refresh_from_row_downward(self._edit_state.row_idx)
+        else:
+            self._refresh_edit_row()
 
     def delete_char_before_cursor(self):
         if not self._edit_state.active:
             return
+
         self._edit_state.delete_before_cursor()
-        plain = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
+        rich_data = self._edit_state.rich_text.to_storage()
+        self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
         self._refresh_edit_row()
@@ -403,21 +439,57 @@ class GCView(wx.ScrolledWindow):
     def delete_char_after_cursor(self):
         if not self._edit_state.active:
             return
+
         self._edit_state.delete_after_cursor()
-        plain = self._edit_state.get_plain_text()
-        set_entry_edit_text(self.nb_dir, self._edit_state.entry_id, plain)
+        rich_data = self._edit_state.rich_text.to_storage()
+        self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
         self._refresh_edit_row()
 
+    def delete_selected_text(self):
+        """Delete the currently selected text."""
+        if not self._edit_state.active or not self._edit_state.has_selection():
+            return
+
+        selection_range = self._edit_state.get_selection_range()
+        if selection_range:
+            start, end = selection_range
+
+            # Check if we're deleting across multiple lines
+            selected_text = self._edit_state.rich_text.to_plain_text()[start:end]
+            has_newlines = '\n' in selected_text
+
+            self._edit_state.rich_text.delete_range(start, end)
+            self._edit_state.cursor_pos = start
+            self._edit_state.clear_selection()
+
+            # Save changes and update display
+            rich_data = self._edit_state.rich_text.to_storage()
+            self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
+            self.invalidate_cache(self._edit_state.entry_id)
+            self._invalidate_edit_row_cache()
+
+            # Update virtual size and refresh properly
+            self.SetVirtualSize((-1, self._index.content_height()))
+
+            if has_newlines:
+                # If we deleted newlines, refresh from this row downward
+                self._refresh_from_row_downward(self._edit_state.row_idx)
+            else:
+                # For single-line changes, just refresh the row
+                self._refresh_edit_row()
+
     def move_cursor(self, delta: int):
         if self._edit_state.active:
             self._edit_state.move_cursor(delta)
+            self._edit_state.update_format_from_cursor()
             self._refresh_edit_row()
 
     def set_cursor_position(self, pos: int):
         if self._edit_state.active:
             self._edit_state.set_cursor_position(pos)
+            self._edit_state.update_format_from_cursor()
             self._refresh_edit_row()
 
     # ------------------------------------------------------------------ #
@@ -516,3 +588,101 @@ class GCView(wx.ScrolledWindow):
 
     def edit_block(self, _bid: str) -> bool:
         return False
+
+    def SetStatusText(self, text: str):
+        """Set status text in main frame."""
+        # Get the main frame and set status text
+        main_frame = wx.GetApp().GetTopWindow()
+        if hasattr(main_frame, 'SetStatusText'):
+            main_frame.SetStatusText(text)
+
+    # ------------ Clipboard operations ------------
+
+    def copy(self):
+        """Copy selected text to clipboard with Mac compatibility improvements."""
+        if not self._edit_state.active or not self._edit_state.has_selection():
+            self.SetStatusText("No text selected to copy")
+            return
+
+        selected_text = self._edit_state.get_selected_text()
+
+        if not selected_text:
+            self.SetStatusText("No text selected to copy")
+            return
+
+        try:
+            if not wx.TheClipboard.Open():
+                self.SetStatusText("Could not open clipboard")
+                return
+
+            # Create text data object
+            data = wx.TextDataObject(selected_text)
+
+            # Try to set the data
+            if not wx.TheClipboard.SetData(data):
+                self.SetStatusText("Failed to set clipboard data")
+            else:
+                # Flush is critical for Mac to ensure data persists
+                wx.TheClipboard.Flush()
+                self.SetStatusText(f"Copied {len(selected_text)} characters")
+
+        except Exception as e:
+            self.SetStatusText(f"Copy failed: {e}")
+        finally:
+            try:
+                wx.TheClipboard.Close()
+            except:
+                pass  # Ignore close errors
+
+    def paste(self):
+        """Paste clipboard text at cursor position."""
+        if not self._edit_state.active:
+            return
+
+        try:
+            if not wx.TheClipboard.Open():
+                self.SetStatusText("Could not open clipboard")
+                return
+
+            if wx.TheClipboard.IsSupported(wx.DataFormat(wx.DF_UNICODETEXT)):
+                data = wx.TextDataObject()
+                success = wx.TheClipboard.GetData(data)
+
+                if success:
+                    text_to_paste = data.GetText()
+                    if text_to_paste:
+                        # Replace selection or insert at cursor
+                        if self._edit_state.has_selection():
+                            self.delete_selected_text()
+                        self.insert_text_at_cursor(text_to_paste)
+                        self.SetStatusText(f"Pasted {len(text_to_paste)} characters")
+                    else:
+                        self.SetStatusText("Clipboard contains empty text")
+                else:
+                    self.SetStatusText("Failed to retrieve clipboard data")
+            else:
+                self.SetStatusText("No compatible text format on clipboard")
+
+        except Exception as e:
+            self.SetStatusText(f"Paste error: {e}")
+        finally:
+            try:
+                wx.TheClipboard.Close()
+            except:
+                pass  # Ignore close errors
+
+    def cut(self):
+        """Cut selected text to clipboard."""
+        if not self._edit_state.active or not self._edit_state.has_selection():
+            return
+
+        selected_text = self._edit_state.get_selected_text()
+        if selected_text and wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(selected_text))
+                self.delete_selected_text()
+                self.SetStatusText(f"Cut {len(selected_text)} characters")
+            except Exception:
+                pass
+            finally:
+                wx.TheClipboard.Close()

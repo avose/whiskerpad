@@ -13,7 +13,7 @@ Pathish = Union[str, Path]
 
 __all__ = ["import_image_into_entry"]
 
-def import_image_into_entry(nb_dir: Pathish, entry_id: str, src_path: Pathish) -> Dict[str, str]:
+def import_image_into_entry(notebook_dir: Pathish, entry_id: str, src_path: Pathish) -> Dict[str, str]:
     """
     Import an image file into the entry directory:
       - ensure entry dir exists (sharded layout)
@@ -36,7 +36,7 @@ def import_image_into_entry(nb_dir: Pathish, entry_id: str, src_path: Pathish) -
     if not is_supported_image_path(src):
         raise ValueError(f"Unsupported image type: {src.suffix}")
 
-    entry = ensure_entry_dir(nb_dir, entry_id)
+    entry = ensure_entry_dir(notebook_dir, entry_id)
     _uuid, filename = image_uuid_and_filename(src.name)
     dst = entry / filename
 

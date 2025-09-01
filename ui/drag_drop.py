@@ -31,19 +31,19 @@ class ImageDropTarget(wx.FileDropTarget):
         """Handle the actual file drop"""
         # Filter for supported image files only
         image_files = [f for f in filenames if is_supported_image_path(f)]
-        
+
         if not image_files:
             wx.LogWarning("No supported image files in drop")
             self.view.SetCursor(wx.Cursor(wx.CURSOR_DEFAULT))
             self._drag_active = False
             return False
-        
+
         # Reset cursor
         self.view.SetCursor(wx.Cursor(wx.CURSOR_DEFAULT))
         self._drag_active = False
-        
+
         # Call the same callback that the toolbar button uses!
         if callable(self.on_image_drop):
             self.on_image_drop(image_files)
-        
+
         return True
