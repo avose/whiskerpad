@@ -103,7 +103,8 @@ def measure_rich_text_wrapped(
                         'italic': run.italic,
                         'color': run.color,
                         'bg': run.bg,
-                        'width': word_width
+                        'width': word_width,
+                        'link_target': run.link_target,
                     })
                     current_line_width += word_width
                 else:
@@ -119,7 +120,8 @@ def measure_rich_text_wrapped(
                         'italic': run.italic,
                         'color': run.color,
                         'bg': run.bg,
-                        'width': word_width
+                        'width': word_width,
+                        'link_target': run.link_target,
                     }]
                     current_line_width = word_width
 

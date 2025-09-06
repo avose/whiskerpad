@@ -1,65 +1,28 @@
-# ui/row.py  – cache-free Row implementation
+# ui/row.py – cache-free Row implementation
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from typing import List
-
 import wx
 
+from core.tree import entry_dir
 from ui.types import Row
 from ui.image_loader import load_thumb_bitmap
 from ui.notebook_text import rich_text_from_entry
 from ui.cursor import pixel_pos_from_char, CursorRenderer
-from core.tree import entry_dir
+from ui.icons import wpIcons
+
+# Import functions that were moved to row_utils
+from ui.row_utils import has_children, caret_hit, item_rect
 
 # Drawing constants
 SELECTION_PEN_WIDTH = 2
 SELECTION_OUTLINE_WIDTH = 1
 DATE_GUTTER_PADDING = 6
 
-
-__all__ = ["caret_hit", "item_rect", "RowPainter", "RowMetrics"]
-
-
-# ---------------------------------------------------------------------------
-# misc helpers
-# ---------------------------------------------------------------------------
-
-
-def has_children(view, row: Row) -> bool:
-    entry = view._get(row.entry_id)  # thin wrapper -> cache.entry()
-    return any(
-        isinstance(it, dict) and it.get("type") == "child"
-        for it in entry.get("items", [])
-    )
-
-
-def caret_hit(view, row: Row, rect: wx.Rect, pos: wx.Point) -> bool:
-    """
-    Return True if click lands in the caret gutter horizontally.
-    Y is ignored to avoid subtle geometry mismatches.
-    """
-    level = int(row.level)
-    x0 = rect.x + view.DATE_COL_W + view.PADDING + level * view.INDENT_W
-    return x0 <= pos.x < (x0 + view.GUTTER_W)
-
-
-def item_rect(view, idx: int) -> wx.Rect:
-    """
-    Rectangle of row *idx* in **content** coordinates (not window).
-    """
-    if not (0 <= idx < len(view._rows)):
-        return wx.Rect(0, 0, 0, 0)
-    w = view.GetClientSize().width
-    top = int(view._index.row_top(idx))
-    h = int(view._index.row_height(idx))
-    return wx.Rect(0, top, w, h)
-
-
-# ---------------------------------------------------------------------------
-# row metrics & painter
-# ---------------------------------------------------------------------------
+__all__ = ["RowPainter", "RowMetrics"]
 
 @dataclass(frozen=True)
 class RowMetrics:
@@ -68,12 +31,10 @@ class RowMetrics:
     GUTTER_W: int
     PADDING: int
 
-
 def _date_str(ts: int | None) -> str:
     if not ts:
         return ""
     return time.strftime("%Y-%m-%d", time.localtime(int(ts)))
-
 
 class RowPainter:
     """
@@ -115,18 +76,46 @@ class RowPainter:
         gc.SetPen(wx.Pen(base_bg))
         gc.DrawRectangle(rect.x, rect.y, rect.width, rect.height)
 
-        # selection overlay (skip gutter)
-        if selected:
-            sel_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
-            gc.SetPen(wx.Pen(sel_color, SELECTION_PEN_WIDTH))
+        # Check if this row is cut (should always show red outline)
+        is_cut_row = (hasattr(self.view, '_cut_entry_id') and 
+                      self.view._cut_entry_id == row.entry_id)
+
+        # Draw cut outline (red) if row is cut, regardless of selection
+        if is_cut_row:
+            cut_color = wx.Colour(220, 20, 20)  # Red color
+            gc.SetPen(wx.Pen(cut_color, SELECTION_PEN_WIDTH))
             gc.SetBrush(wx.Brush(wx.Colour(0, 0, 0, 0)))  # Transparent brush
 
-            # Draw outline rectangle
+            # Draw red outline rectangle
             outline_x = rect.x + self.m.DATE_COL_W
             outline_y = rect.y
             outline_w = max(0, rect.width - self.m.DATE_COL_W)
             outline_h = rect.height
+            gc.DrawRectangle(outline_x, outline_y, outline_w, outline_h)
 
+        # Check if this row is marked as bookmark source
+        elif self.view._bookmark_source_id and self.view._bookmark_source_id == row.entry_id:
+            bookmark_color = wx.Colour(20, 220, 20)  # Green color
+            gc.SetPen(wx.Pen(bookmark_color, SELECTION_PEN_WIDTH))
+            gc.SetBrush(wx.Brush(wx.Colour(0, 0, 0, 0)))  # Transparent brush
+            # Draw green outline rectangle
+            outline_x = rect.x + self.m.DATE_COL_W
+            outline_y = rect.y
+            outline_w = max(0, rect.width - self.m.DATE_COL_W)
+            outline_h = rect.height
+            gc.DrawRectangle(outline_x, outline_y, outline_w, outline_h)
+
+        # Draw selection outline (blue) if row is selected AND not cut
+        elif selected:
+            sel_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
+            gc.SetPen(wx.Pen(sel_color, SELECTION_PEN_WIDTH))
+            gc.SetBrush(wx.Brush(wx.Colour(0, 0, 0, 0)))  # Transparent brush
+
+            # Draw blue outline rectangle
+            outline_x = rect.x + self.m.DATE_COL_W
+            outline_y = rect.y
+            outline_w = max(0, rect.width - self.m.DATE_COL_W)
+            outline_h = rect.height
             gc.DrawRectangle(outline_x, outline_y, outline_w, outline_h)
 
         # date gutter (bg + YY-MM-DD + outline)
@@ -252,8 +241,35 @@ class RowPainter:
             return edit_state.get_selection_range()
         return None
 
+    def _draw_link_icon(self, gc, x, y, seg):
+        """Draw a small link icon before link text. Returns icon width."""
+        try:
+            # Load the link icon
+            icon = wpIcons.Get("link")
+
+            if not icon or not icon.IsOk():
+                return 0  # No icon available, no extra width needed
+
+            # Your icons are already 16x16, so use them as-is
+            icon_size = 16
+
+            # Position icon vertically centered with text
+            font_size = self.view._font.GetPointSize()
+            icon_y = y + (font_size - icon_size) // 2
+
+            # Draw the icon
+            gc.DrawBitmap(icon, x, icon_y, icon_size, icon_size)
+
+            # Return icon width + small padding
+            return icon_size + 3  # 16px icon + 3px padding
+
+        except Exception:
+            # Fallback if icon loading fails
+            return 0
+
+
     def _draw_rich_text_line(self, gc, line, x, cur_y, start_char_pos, selection_range,
-                            row_rect, is_first_line, is_last_line):
+                             row_rect, is_first_line, is_last_line):
         """Draw a single line of rich text and return updated character position."""
         char_pos = start_char_pos
         cur_x = x
@@ -262,8 +278,7 @@ class RowPainter:
         line_selection_bounds = None
         if selection_range:
             line_selection_bounds = self._calculate_line_selection_bounds(
-                line, char_pos, x, selection_range
-            )
+                line, char_pos, x, selection_range)
 
         # Draw all segments
         for seg in line.get("segments", []):
@@ -274,11 +289,21 @@ class RowPainter:
             # Draw segment background
             self._draw_segment_background(gc, seg, cur_x, cur_y, line["height"])
 
-            # Draw the text
-            font = self.view._bold if seg.get("bold") else self.view._font
+            # Create appropriate font (with underlining for links)
+            base_font = self.view._bold if seg.get("bold") else self.view._font
+
+            if seg.get("link_target"):
+                # Create copy of base font and set underlined
+                font = wx.Font(base_font)  # Copy constructor
+                font.SetUnderlined(True)
+            else:
+                font = base_font
+
             color = self._get_segment_color(seg)
             gc.SetFont(font, color)
             gc.DrawText(txt, cur_x, cur_y)
+
+            # Remove the manual underline drawing - font handles it now!
 
             cur_x += seg["width"]
             char_pos += len(txt)
@@ -287,8 +312,7 @@ class RowPainter:
         if line_selection_bounds and row_rect:
             self._draw_line_selection_outline(
                 gc, line_selection_bounds, cur_y, line["height"],
-                row_rect, is_first_line, is_last_line
-            )
+                row_rect, is_first_line, is_last_line)
 
         return char_pos
 
@@ -391,10 +415,25 @@ class RowPainter:
             gc.DrawRectangle(x, y, width, height)
 
     def _get_segment_color(self, seg):
-        """Get the color for a text segment, with fallback."""
+        """Get the color for a text segment, handling links with validation."""
+        # Check if this is a link
+        if seg.get("link_target"):
+            target_id = seg.get("link_target")
+
+            # Check if the target still exists
+            try:
+                self.view._get(target_id)
+                # Target exists - use blue for working links
+                return wx.Colour("#0000ff")
+            except Exception:
+                # Target doesn't exist - use red for broken links
+                return wx.Colour("#ff0000")
+
+        # Regular color handling for non-links
         color_str = seg.get("color")
         if color_str and self._is_valid_color(color_str):
             return wx.Colour(color_str)
+
         return wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
 
     def _is_valid_color(self, color_str):
@@ -466,7 +505,41 @@ class RowPainter:
             dy = rect.y + self.m.PADDING
             gc.DrawText(ds, dx, dy)
 
-        if selected:
+        # Check if this row is cut (always show red gutter if cut)
+        is_cut_row = (hasattr(self.view, '_cut_entry_id') and 
+                      self.view._cut_entry_id == entry.get("id"))
+
+        # Check if this row is bookmark source
+        is_bookmark_source = (self.view._bookmark_source_id and
+                              self.view._bookmark_source_id == entry.get("id"))
+
+        # Draw gutter outline for cut rows (red) or selected rows (blue)
+        if is_cut_row:
+            # Red outline for cut rows (regardless of selection)
+            sel = wx.Colour(220, 20, 20)
+            gc.SetPen(wx.Pen(sel, 1))
+            gc.StrokeLine(rect.x, rect.y, rect.x, rect.y + rect.height - 1)
+            gc.StrokeLine(rect.x, rect.y, rect.x + self.m.DATE_COL_W, rect.y)
+            gc.StrokeLine(
+                rect.x,
+                rect.y + rect.height - 1,
+                rect.x + self.m.DATE_COL_W,
+                rect.y + rect.height - 1,
+            )
+        elif is_bookmark_source:
+            # Green outline for bookmark source rows
+            sel = wx.Colour(20, 220, 20)
+            gc.SetPen(wx.Pen(sel, 1))
+            gc.StrokeLine(rect.x, rect.y, rect.x, rect.y + rect.height - 1)
+            gc.StrokeLine(rect.x, rect.y, rect.x + self.m.DATE_COL_W, rect.y)
+            gc.StrokeLine(
+                rect.x,
+                rect.y + rect.height - 1,
+                rect.x + self.m.DATE_COL_W,
+                rect.y + rect.height - 1,
+            )
+        elif selected:
+            # Blue outline for selected (non-cut) rows
             sel = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
             gc.SetPen(wx.Pen(sel, 1))
             gc.StrokeLine(rect.x, rect.y, rect.x, rect.y + rect.height - 1)

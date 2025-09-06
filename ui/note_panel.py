@@ -12,7 +12,7 @@ class NotePanel(wx.Panel):
         s = wx.BoxSizer(wx.VERTICAL)
         # Pass the callback through to the view
         self.view = NotebookView(self, notebook_dir, entry_id, on_image_drop=on_image_drop)
-        s.Add(self.view, 1, wx.EXPAND | wx.ALL, 6)
+        s.Add(self.view, 1, wx.EXPAND)
         self.SetSizer(s)
 
     # API used by MainFrame

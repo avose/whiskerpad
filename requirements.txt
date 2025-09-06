@@ -1,0 +1,2 @@
+# WhiskerPad Core Requirements
+wxPython>=4.2.3

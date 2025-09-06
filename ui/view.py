@@ -1,29 +1,36 @@
-# ui/view.py  – refactored for unified NotebookCache
+# ui/view.py
+
 from __future__ import annotations
 
 import wx
+import os
+import tempfile
 from typing import Dict, Any, List, Optional
 
 # -----------------------------------------------------------------------------
 # project imports
 # -----------------------------------------------------------------------------
+
+from core.log import Log
 from core.tree import (
     commit_entry_edit,
     cancel_entry_edit,
 )
-from core.tree_utils import (
-    add_sibling_after,
-    indent_under_prev_sibling,
-    outdent_to_parent_sibling,
-    toggle_collapsed,
-)
 
 from ui.cache import NotebookCache
-from ui.constants import INDENT_W, GUTTER_W, PADDING, DATE_COL_W, DEFAULT_ROW_H
+from ui.constants import (
+    INDENT_W,
+    GUTTER_W,
+    PADDING,
+    DATE_COL_W,
+    DEFAULT_ROW_H,
+    DEFAULT_BG_COLOR,
+)
+
 from ui.types import Row
-from ui.model import flatten_tree, update_tree_incremental
+from ui.model import flatten_tree
 from ui.layout import measure_row_height
-from ui.row import RowPainter, RowMetrics, caret_hit, item_rect
+from ui.row import RowPainter, RowMetrics
 from ui.select import select_entry_id
 from ui.mouse import (
     handle_left_down,
@@ -34,23 +41,24 @@ from ui.mouse import (
 )
 from ui.keys import handle_key_event
 from ui.paint import paint_background, paint_rows
-from ui.scroll import soft_ensure_visible, visible_range, clamp_scroll_y
+from ui.scroll import soft_ensure_visible
 from ui.index import LayoutIndex
 from ui.drag_drop import ImageDropTarget
 from ui.edit_state import EditState, RichText
 from ui.notebook_text import rich_text_from_entry
 from ui.cursor import CursorRenderer
+from ui.clipboard import Clipboard
+from ui.row_utils import is_image_row, get_image_file_path, item_rect
+from ui.flat_tree import FlatTree
 
 # =============================================================================
 class GCView(wx.ScrolledWindow):
     """
     GraphicsContext-based, variable-row-height view of the entry tree
     with inline rich-text editing.
+    
+    Now uses FlatTree for all tree/row operations.
     """
-
-    # ------------------------------------------------------------------ #
-    # construction
-    # ------------------------------------------------------------------ #
 
     def __init__(self, parent: wx.Window, notebook_dir: str, root_id: str, on_image_drop=None):
         super().__init__(parent, style=wx.BORDER_SIMPLE | wx.WANTS_CHARS)
@@ -64,6 +72,8 @@ class GCView(wx.ScrolledWindow):
         # flattened rows + selection
         self._rows: List[Row] = []
         self._sel: int = -1
+        self._cut_entry_id: Optional[str] = None
+        self._bookmark_source_id: Optional[str] = None
 
         # layout index
         self._index: LayoutIndex = LayoutIndex()
@@ -74,7 +84,7 @@ class GCView(wx.ScrolledWindow):
         self._cursor_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_cursor_blink)
 
-        # Selection state.
+        # Selection state for drag operations
         self._drag_start_pos = None
         self._is_dragging = False
 
@@ -96,8 +106,8 @@ class GCView(wx.ScrolledWindow):
         # appearance + scrolling
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.SetDoubleBuffered(True)
-        self.SetBackgroundColour(wx.Colour(246, 252, 246))
-        self.SetScrollRate(0, 1)  # pixel vertical scrolling
+        self.SetBackgroundColour(DEFAULT_BG_COLOR)
+        self.SetScrollRate(0, 1)
 
         # fonts + default row height
         self._font = self.GetFont()
@@ -107,10 +117,14 @@ class GCView(wx.ScrolledWindow):
             wx.FONTSTYLE_NORMAL,
             wx.FONTWEIGHT_BOLD,
         )
+
         dc = wx.ClientDC(self)
         dc.SetFont(self._font)
         lh = dc.GetTextExtent("Ag")[1]
         self.ROW_H = max(lh + 2 * self.PADDING, DEFAULT_ROW_H)
+
+        # CREATE FLATTREE INSTANCE - This is the key integration point
+        self.flat_tree = FlatTree(self)
 
         # event bindings
         self.Bind(wx.EVT_PAINT, self._on_paint)
@@ -132,6 +146,23 @@ class GCView(wx.ScrolledWindow):
 
         # build model
         self.rebuild()
+
+    def cleanup(self):
+        """Clean up resources before destruction to prevent crashes."""
+        # Stop the cursor timer
+        if hasattr(self, '_cursor_timer') and self._cursor_timer:
+            self._cursor_timer.Stop()
+
+        # Exit edit mode cleanly
+        if self._edit_state.active:
+            self.exit_edit_mode(save=True)
+
+        # Clear cut state
+        self._cut_entry_id = None
+
+        # Clear the image cache to free wx.Bitmap objects
+        from ui.image_loader import clear_thumb_cache
+        clear_thumb_cache()
 
     # ------------------------------------------------------------------ #
     # thin helper: keep legacy _get(...) usage alive
@@ -196,6 +227,7 @@ class GCView(wx.ScrolledWindow):
                 (i for i, r in enumerate(self._rows) if r.entry_id == self._edit_state.entry_id),
                 -1,
             )
+
             if new_idx >= 0:
                 self._edit_state.row_idx = new_idx
             else:
@@ -225,42 +257,57 @@ class GCView(wx.ScrolledWindow):
     # ------------ Edit mode management ------------
 
     def enter_edit_mode(self, row_idx: int, cursor_pos: int = 0):
-        self._save_current_edit()
+        # First, properly exit any active edit mode using the dedicated function
+        self.exit_edit_mode(save=True)
 
+        # Now handle ONLY entering edit mode for the new row
         if not (0 <= row_idx < len(self._rows)):
             return
+
         row = self._rows[row_idx]
         entry = self._get(row.entry_id)
+        Log.debug(f"enter_edit_mode({row_idx=}, {cursor_pos=}), {row.entry_id=}", 10)
         rich_text = rich_text_from_entry(entry)
 
+        # Initialize edit state for the NEW row
         self._edit_state.start_editing(row_idx, row.entry_id, rich_text, cursor_pos)
-        #self._edit_state.update_format_from_cursor()
         self._cursor_timer.Start(500)
         self._sel = row_idx
-
         self.invalidate_cache(row.entry_id)
         self._refresh_edit_row()
 
     def exit_edit_mode(self, save: bool = True):
         if not self._edit_state.active:
             return
+
         entry_id = self._edit_state.entry_id
+        Log.debug(f"exit_edit_mode(), {entry_id=}", 10)
         final_rt = self._edit_state.stop_editing()
         self._cursor_timer.Stop()
 
         if save and final_rt and entry_id:
-            commit_entry_edit(self.notebook_dir, entry_id, final_rt.to_storage())
+            import json
+
+            # Load the stored content from disk
+            entry = self._get(entry_id)
+            stored_text = entry.get("text", [])
+
+            # Get the edited content
+            current_text = final_rt.to_storage()
+
+            # Only commit if content actually changed
+            if stored_text == current_text:
+                cancel_entry_edit(self.notebook_dir, entry_id)
+            else:
+                commit_entry_edit(self.notebook_dir, entry_id, current_text)
+
         elif entry_id:
             cancel_entry_edit(self.notebook_dir, entry_id)
 
         if entry_id:
             self.invalidate_cache(entry_id)
-        self.Refresh()
 
-    def _save_current_edit(self):
-        if self._edit_state.active and self._edit_state.entry_id and self._edit_state.rich_text:
-            rich_data = self._edit_state.rich_text.to_storage()
-            self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
+        self.Refresh()
 
     # used after each keystroke while editing
     def _invalidate_edit_row_cache(self):
@@ -290,50 +337,16 @@ class GCView(wx.ScrolledWindow):
         return result
 
     # ------------------------------------------------------------------ #
-    # incremental collapse / expand
+    # Collapse / expand
     # ------------------------------------------------------------------ #
 
     def toggle_collapsed_fast(self, entry_id: str):
-        toggle_collapsed(self.notebook_dir, entry_id)
-        self.invalidate_subtree_cache(entry_id)
+        """Uses FlatTree for consistent incremental updates."""
+        self.flat_tree.toggle_collapse(entry_id)
 
-        self._rows = update_tree_incremental(self.notebook_dir, self._rows, entry_id)
-        self._index.rebuild(self, self._rows)
-
-        self.SetVirtualSize((-1, self._index.content_height()))
-        self._refresh_changed_area(entry_id)
-
-    # ------------------------------------------------------------------ #
-    # incremental insert (unchanged except cache access)
-    # ------------------------------------------------------------------ #
-
-    def add_node_incremental(
-        self, parent_entry_id: str, new_entry_id: str, insert_after_id: str | None = None
-    ):
-        insert_idx = -1
-        if insert_after_id:
-            for i, row in enumerate(self._rows):
-                if row.entry_id == insert_after_id:
-                    insert_idx = i + 1
-                    break
-        if insert_idx == -1:
-            self.rebuild()
-            return
-
-        try:
-            _ = self._get(new_entry_id)  # ensure cached
-            level = self._rows[insert_idx - 1].level if insert_after_id else self._rows[
-                insert_idx - 1
-            ].level + 1
-            new_row = Row(kind="node", entry_id=new_entry_id, level=level)
-
-            self._rows.insert(insert_idx, new_row)
-            self._index.insert_row(self, insert_idx, new_row)
-
-            self.SetVirtualSize((-1, self._index.content_height()))
-            self._refresh_from_row(insert_idx)
-        except Exception:
-            self.rebuild()
+    def navigate_to_entry(self, entry_id: str) -> bool:
+        """Uses FlatTree for ancestor expansion."""
+        return self.flat_tree.ensure_entry_visible(entry_id)
 
     # ------------------------------------------------------------------ #
     # partial refresh helpers
@@ -416,12 +429,16 @@ class GCView(wx.ScrolledWindow):
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
 
-        # Update virtual size
-        self.SetVirtualSize((-1, self._index.content_height()))
+        # Update virtual size to handle height changes
+        new_height = self._index.content_height()
+        self.SetVirtualSize((-1, new_height))
 
-        # If inserting newlines, refresh from this row downward
+        # If inserting newlines, ensure the edited row stays visible
         if '\n' in text:
             self._refresh_from_row_downward(self._edit_state.row_idx)
+            # Ensure the current edit position is still visible
+            from ui.scroll import soft_ensure_visible
+            soft_ensure_visible(self, self._edit_state.row_idx)
         else:
             self._refresh_edit_row()
 
@@ -429,23 +446,54 @@ class GCView(wx.ScrolledWindow):
         if not self._edit_state.active:
             return
 
+        # Check if we're deleting a newline (affects height)
+        plain_text = self._edit_state.rich_text.to_plain_text()
+        cursor_pos = self._edit_state.cursor_pos
+        deleting_newline = (cursor_pos > 0 and 
+                           cursor_pos <= len(plain_text) and 
+                           plain_text[cursor_pos - 1] == '\n')
+
         self._edit_state.delete_before_cursor()
         rich_data = self._edit_state.rich_text.to_storage()
         self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
-        self._refresh_edit_row()
+
+        # Update virtual size and scroll if deleting newlines
+        self.SetVirtualSize((-1, self._index.content_height()))
+
+        if deleting_newline:
+            from ui.scroll import soft_ensure_visible
+            soft_ensure_visible(self, self._edit_state.row_idx)
+            self._refresh_from_row_downward(self._edit_state.row_idx)
+        else:
+            self._refresh_edit_row()
 
     def delete_char_after_cursor(self):
         if not self._edit_state.active:
             return
+
+        # Check if we're deleting a newline (affects height)
+        plain_text = self._edit_state.rich_text.to_plain_text()
+        cursor_pos = self._edit_state.cursor_pos
+        deleting_newline = (cursor_pos < len(plain_text) and 
+                           plain_text[cursor_pos] == '\n')
 
         self._edit_state.delete_after_cursor()
         rich_data = self._edit_state.rich_text.to_storage()
         self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
         self.invalidate_cache(self._edit_state.entry_id)
         self._invalidate_edit_row_cache()
-        self._refresh_edit_row()
+
+        # Update virtual size and scroll if deleting newlines
+        self.SetVirtualSize((-1, self._index.content_height()))
+
+        if deleting_newline:
+            from ui.scroll import soft_ensure_visible
+            soft_ensure_visible(self, self._edit_state.row_idx)
+            self._refresh_from_row_downward(self._edit_state.row_idx)
+        else:
+            self._refresh_edit_row()
 
     def delete_selected_text(self):
         """Delete the currently selected text."""
@@ -514,7 +562,7 @@ class GCView(wx.ScrolledWindow):
 
         if y < ch:
             w = self.GetClientSize().width
-            bg = self.GetBackgroundColour() or wx.Colour(246, 252, 246)
+            bg = self.GetBackgroundColour() or DEFAULT_BG_COLOR
             gc.SetBrush(wx.Brush(bg))
             gc.SetPen(wx.Pen(bg))
             gc.DrawRectangle(self.DATE_COL_W, y, max(0, w - self.DATE_COL_W), ch - y)
@@ -577,7 +625,16 @@ class GCView(wx.ScrolledWindow):
         self.rebuild()
 
     def current_entry_id(self) -> Optional[str]:
-        return self._rows[self._sel].entry_id if 0 <= self._sel < len(self._rows) else None
+        # If we have rows and a valid selection, return the selected entry
+        if 0 <= self._sel < len(self._rows):
+            return self._rows[self._sel].entry_id
+
+        # For empty notebooks, return the root entry ID so operations can work
+        if not self._rows:
+            return self.root_id
+
+        # No valid selection
+        return None
 
     def select_entry(self, entry_id: str, ensure_visible: bool = True) -> bool:
         return select_entry_id(self, entry_id, ensure_visible)
@@ -594,95 +651,443 @@ class GCView(wx.ScrolledWindow):
         # Get the main frame and set status text
         main_frame = wx.GetApp().GetTopWindow()
         if hasattr(main_frame, 'SetStatusText'):
+            Log.debug(text, 0)
             main_frame.SetStatusText(text)
 
     # ------------ Clipboard operations ------------
 
     def copy(self):
-        """Copy selected text to clipboard with Mac compatibility improvements."""
-        if not self._edit_state.active or not self._edit_state.has_selection():
-            self.SetStatusText("No text selected to copy")
-            return
-
-        selected_text = self._edit_state.get_selected_text()
-
-        if not selected_text:
-            self.SetStatusText("No text selected to copy")
-            return
-
+        """Copy selected text or mark row as bookmark source."""
         try:
-            if not wx.TheClipboard.Open():
-                self.SetStatusText("Could not open clipboard")
-                return
+            # If we're in edit mode, check if it's an image row
+            if self._edit_state.active:
+                if is_image_row(self, self._edit_state.row_idx):
+                    image_path = get_image_file_path(self, self._edit_state.row_idx)
+                    if image_path:
+                        Clipboard.copy_image(image_path)
+                        self.SetStatusText("Copied image to clipboard")
+                    else:
+                        self.SetStatusText("Error: Could not find image file")
+                    return
 
-            # Create text data object
-            data = wx.TextDataObject(selected_text)
+                # Handle text copy (existing logic)
+                if not self._edit_state.has_selection():
+                    self.SetStatusText("No text selected to copy")
+                    return
 
-            # Try to set the data
-            if not wx.TheClipboard.SetData(data):
-                self.SetStatusText("Failed to set clipboard data")
+                selected_text = self._edit_state.get_selected_text()
+                if selected_text:
+                    Clipboard.copy_text(selected_text)
+                    self.SetStatusText(f"Copied {len(selected_text)} characters")
+                else:
+                    self.SetStatusText("No text selected to copy")
+
             else:
-                # Flush is critical for Mac to ensure data persists
-                wx.TheClipboard.Flush()
-                self.SetStatusText(f"Copied {len(selected_text)} characters")
+                # Navigation mode - mark row as bookmark source
+                if 0 <= self._sel < len(self._rows):
+                    # Clear previous bookmark source
+                    old_bookmark_id = self._bookmark_source_id
+                    if old_bookmark_id:
+                        self._refresh_changed_area(old_bookmark_id)
+
+                    # Clear cut state (mutual exclusion)
+                    if self._cut_entry_id:
+                        old_cut_id = self._cut_entry_id
+                        self._cut_entry_id = None
+                        self._refresh_changed_area(old_cut_id)
+
+                    # Set new bookmark source
+                    self._bookmark_source_id = self._rows[self._sel].entry_id
+                    self._refresh_changed_area(self._bookmark_source_id)
+
+                    # Get entry title for status
+                    entry = self._get(self._bookmark_source_id)
+                    title = entry.get('text', [{}])[0].get('content', 'Untitled')[:30]
+                    self.SetStatusText(f"Row marked as bookmark source: {title}")
+                else:
+                    self.SetStatusText("No row selected to bookmark")
 
         except Exception as e:
-            self.SetStatusText(f"Copy failed: {e}")
-        finally:
-            try:
-                wx.TheClipboard.Close()
-            except:
-                pass  # Ignore close errors
+            error_msg = f"Copy failed: {e}"
+            self.SetStatusText(error_msg)
 
     def paste(self):
-        """Paste clipboard text at cursor position."""
-        if not self._edit_state.active:
+        """Uses FlatTree for sibling creation."""
+        # First check for link insertion when in edit mode with bookmark source
+        if (self._edit_state.active and
+            self._bookmark_source_id is not None and
+            self._insert_link_from_bookmark_source()):
+            return
+
+        # Original paste logic
+        if self._cut_entry_id and not self._edit_state.active:
+            # Use FlatTree for cut/paste operations
+            self._move_cut_row()
+        elif Clipboard.has_image():
+            # Use FlatTree for image paste
+            self._paste_image()
+        elif self._edit_state.active:
+            # Paste text in edit mode (unchanged)
+            self._paste_text()
+        else:
+            self.SetStatusText("Nothing to paste")
+
+    def _paste_image(self):
+        """Handle pasting image using FlatTree."""
+        temp_image_path = Clipboard.get_image()
+        if not temp_image_path:
+            self.SetStatusText("Failed to get image from clipboard")
             return
 
         try:
-            if not wx.TheClipboard.Open():
-                self.SetStatusText("Could not open clipboard")
-                return
+            from ui.image_import import import_image_into_entry
+            from core.tree import load_entry, save_entry
 
-            if wx.TheClipboard.IsSupported(wx.DataFormat(wx.DF_UNICODETEXT)):
-                data = wx.TextDataObject()
-                success = wx.TheClipboard.GetData(data)
-
-                if success:
-                    text_to_paste = data.GetText()
-                    if text_to_paste:
-                        # Replace selection or insert at cursor
-                        if self._edit_state.has_selection():
-                            self.delete_selected_text()
-                        self.insert_text_at_cursor(text_to_paste)
-                        self.SetStatusText(f"Pasted {len(text_to_paste)} characters")
-                    else:
-                        self.SetStatusText("Clipboard contains empty text")
-                else:
-                    self.SetStatusText("Failed to retrieve clipboard data")
+            # Determine where to insert
+            if self._edit_state.active:
+                current_id = self._edit_state.entry_id
+                self.exit_edit_mode(save=True)
             else:
-                self.SetStatusText("No compatible text format on clipboard")
+                current_id = self.current_entry_id()
+
+            if not current_id:
+                # No selection, use root
+                from core.tree import get_root_ids
+                root_ids = get_root_ids(self.notebook_dir)
+                if root_ids:
+                    current_id = root_ids[0]
+                else:
+                    raise RuntimeError("No location to paste image")
+
+            # Use FlatTree to create sibling
+            new_id = self.flat_tree.create_sibling_after(current_id)
+
+            # Import the image
+            info = import_image_into_entry(self.notebook_dir, new_id, temp_image_path)
+            token = info["token"]
+
+            # Set the entry text to the image token
+            entry = load_entry(self.notebook_dir, new_id)
+            entry["text"] = [{"content": token}]
+            entry["edit"] = ""
+            save_entry(self.notebook_dir, entry)
+
+            # Select the new image row
+            for i, row in enumerate(self._rows):
+                if row.entry_id == new_id:
+                    self._change_selection(i)
+                    soft_ensure_visible(self, i)
+                    break
+
+            self.SetStatusText("Pasted image")
+
+            # Clean up temp file if it was created by us
+            if temp_image_path and temp_image_path.startswith(tempfile.gettempdir()):
+                try:
+                    os.unlink(temp_image_path)
+                except Exception:
+                    pass  # Ignore cleanup errors
 
         except Exception as e:
-            self.SetStatusText(f"Paste error: {e}")
-        finally:
-            try:
-                wx.TheClipboard.Close()
-            except:
-                pass  # Ignore close errors
+            self.SetStatusText(f"Failed to paste image: {e}")
 
-    def cut(self):
-        """Cut selected text to clipboard."""
-        if not self._edit_state.active or not self._edit_state.has_selection():
+    def _paste_text(self):
+        """Handle pasting text from clipboard."""
+        if not self._edit_state.active:
+            self.SetStatusText("Start editing to paste text")
             return
 
-        selected_text = self._edit_state.get_selected_text()
-        if selected_text and wx.TheClipboard.Open():
-            try:
-                wx.TheClipboard.SetData(wx.TextDataObject(selected_text))
+        text = Clipboard.get_text()
+        if text:
+            if self._edit_state.has_selection():
+                self.delete_selected_text()
+            self.insert_text_at_cursor(text)
+            self.SetStatusText(f"Pasted {len(text)} characters")
+        else:
+            self.SetStatusText("No text on clipboard")
+
+    def _insert_link_from_bookmark_source(self) -> bool:
+        """Insert a link to the bookmark source at the cursor position."""
+        if not self._bookmark_source_id or not self._edit_state.active:
+            return False
+
+        try:
+            # Get the source entry to create default link text
+            source_entry = self._get(self._bookmark_source_id)
+
+            # Get default text from the entry (first 30 chars of content)
+            text_content = source_entry.get('text', [{}])
+            if text_content and text_content[0].get('content'):
+                default_text = text_content[0]['content'].strip()[:30]
+                if not default_text:
+                    default_text = "Untitled"
+            else:
+                default_text = "Untitled"
+
+            # If the default text is too long, add ellipsis
+            if len(default_text) == 30 and len(source_entry.get('text', [{}])[0].get('content', '')) > 30:
+                default_text += "..."
+
+            # Show dialog to get custom link text from user
+            dlg = wx.TextEntryDialog(
+                self,
+                "Enter text for the link:",
+                "Insert Link",
+                default_text
+            )
+
+            if dlg.ShowModal() != wx.ID_OK:
+                dlg.Destroy()
+                return False  # User cancelled
+
+            # Get the user-entered text
+            link_text = dlg.GetValue().strip()
+            dlg.Destroy()
+
+            if not link_text:
+                self.SetStatusText("Link text cannot be empty")
+                return False
+
+            # Insert the link using the EditState method
+            self._edit_state.insert_link(self._bookmark_source_id, link_text)
+
+            # Update cache and rebuild layout (same as insert_text_at_cursor)
+            rich_data = self._edit_state.rich_text.to_storage()
+            self.cache.set_edit_rich_text(self._edit_state.entry_id, rich_data)
+            self.invalidate_cache(self._edit_state.entry_id)
+            self._invalidate_edit_row_cache()
+
+            # Update virtual size and refresh
+            new_height = self._index.content_height()
+            self.SetVirtualSize((-1, new_height))
+            self._refresh_edit_row()
+
+            # Clear the bookmark source since we've used it
+            self.clear_bookmark_source()
+
+            self.SetStatusText(f"Inserted link: {link_text}")
+            return True
+
+        except Exception as e:
+            self.SetStatusText(f"Failed to insert link: {e}")
+            return False
+
+    def cut(self):
+        """Cut selected text or mark row for moving."""
+        if self._edit_state.active:
+            # In edit mode - cut selected text
+            if not self._edit_state.has_selection():
+                self.SetStatusText("No text selected to cut")
+                return
+
+            selected_text = self._edit_state.get_selected_text()
+            if selected_text and Clipboard.copy_text(selected_text):
                 self.delete_selected_text()
                 self.SetStatusText(f"Cut {len(selected_text)} characters")
-            except Exception:
-                pass
-            finally:
-                wx.TheClipboard.Close()
+            else:
+                self.SetStatusText("Failed to cut text")
+        else:
+            # In navigation mode - mark row for moving
+            if 0 <= self._sel < len(self._rows):
+                # Clear bookmark source state (mutual exclusion)
+                if self._bookmark_source_id:
+                    old_bookmark_id = self._bookmark_source_id
+                    self._bookmark_source_id = None
+                    self._refresh_changed_area(old_bookmark_id)
+
+                self._cut_entry_id = self._rows[self._sel].entry_id
+                self.SetStatusText("Row marked for moving (use Ctrl+V to move)")
+                self.Refresh() # Repaint to show red outline
+            else:
+                self.SetStatusText("No row selected to cut")
+
+    def _move_cut_row(self):
+        """Move cut row using FlatTree."""
+        if not self._cut_entry_id:
+            return
+
+        if not (0 <= self._sel < len(self._rows)):
+            self.SetStatusText("Select a target location first")
+            return
+
+        target_entry_id = self._rows[self._sel].entry_id
+
+        if self._cut_entry_id == target_entry_id:
+            self.SetStatusText("Cannot move row after itself")
+            return
+
+        #Use FlatTree for move operation
+        if self.flat_tree.move_entry_after(self._cut_entry_id, target_entry_id):
+            moved_id = self._cut_entry_id
+            self._cut_entry_id = None  # Clear cut state
+
+            # Select the moved row
+            for i, row in enumerate(self._rows):
+                if row.entry_id == moved_id:
+                    self._change_selection(i)
+                    soft_ensure_visible(self, i)
+                    break
+
+            self.SetStatusText("Row moved")
+        else:
+            self.SetStatusText("Cannot move row to that location")
+
+    def clear_bookmark_source(self):
+        """Clear the bookmark source selection."""
+        if self._bookmark_source_id:
+            old_id = self._bookmark_source_id
+            self._bookmark_source_id = None
+            self._refresh_changed_area(old_id)
+
+
+    # ------------ Image zoom operations ------------
+
+    def zoom_image_in(self):
+        """Zoom in the selected image thumbnail."""
+        from ui.image_transform import get_current_thumbnail_max_size, calculate_zoom_in_size, can_zoom_in
+
+        row_idx = self._get_selected_image_row_index()
+        if row_idx is None:
+            return
+
+        # Get layout and extract current max size
+        row = self._rows[row_idx]
+        layout = self.cache.layout(row.entry_id) or {}
+        current_max = get_current_thumbnail_max_size(layout)
+
+        if current_max is None or not can_zoom_in(current_max):
+            return
+
+        new_max_size = calculate_zoom_in_size(current_max)
+        self._regenerate_thumbnail(row_idx, new_max_size)
+
+    def zoom_image_out(self):
+        """Zoom out the selected image thumbnail."""
+        from ui.image_transform import get_current_thumbnail_max_size, calculate_zoom_out_size, can_zoom_out
+
+        row_idx = self._get_selected_image_row_index()
+        if row_idx is None:
+            return
+
+        # Get layout and extract current max size
+        row = self._rows[row_idx]
+        layout = self.cache.layout(row.entry_id) or {}
+        current_max = get_current_thumbnail_max_size(layout)
+
+        if current_max is None or not can_zoom_out(current_max):
+            return
+
+        new_max_size = calculate_zoom_out_size(current_max)
+        self._regenerate_thumbnail(row_idx, new_max_size)
+
+    def zoom_image_reset(self):
+        """Reset image thumbnail to natural size (original size or 256px, whichever is smaller)."""
+        from ui.image_transform import calculate_reset_size
+        from ui.row_utils import get_original_image_dimensions
+
+        row_idx = self._get_selected_image_row_index()
+        if row_idx is None:
+            return
+
+        # Get original image dimensions
+        original_dims = get_original_image_dimensions(self, row_idx)
+        if original_dims is None:
+            return
+
+        original_width, original_height = original_dims
+        reset_size = calculate_reset_size(original_width, original_height)
+        self._regenerate_thumbnail(row_idx, reset_size)
+
+    # ------------ Image transform operations ------------
+
+    def rotate_image_clockwise(self):
+        """Rotate the selected image thumbnail 90 degrees clockwise."""
+        from ui.image_transform import rotate_thumbnail_clockwise
+        self._apply_thumbnail_transform(rotate_thumbnail_clockwise)
+
+    def rotate_image_anticlockwise(self):
+        """Rotate the selected image thumbnail 90 degrees anticlockwise."""
+        from ui.image_transform import rotate_thumbnail_anticlockwise
+        self._apply_thumbnail_transform(rotate_thumbnail_anticlockwise)
+
+    def flip_image_vertical(self):
+        """Flip the selected image thumbnail vertically."""
+        from ui.image_transform import flip_thumbnail_vertical
+        self._apply_thumbnail_transform(flip_thumbnail_vertical)
+
+    def flip_image_horizontal(self):
+        """Flip the selected image thumbnail horizontally."""
+        from ui.image_transform import flip_thumbnail_horizontal
+        self._apply_thumbnail_transform(flip_thumbnail_horizontal)
+
+    def _apply_thumbnail_transform(self, transform_func):
+        """Apply a transformation function to the selected image thumbnail."""
+        from ui.row_utils import get_image_filename
+        from ui.image_loader import clear_thumb_cache_for_entry
+        from ui.image_utils import thumb_name_for
+        from core.tree import entry_dir
+
+        row_idx = self._get_selected_image_row_index()
+        if row_idx is None:
+            return
+
+        row = self._rows[row_idx]
+        entry_id = row.entry_id
+
+        # Get image filename and thumbnail path
+        image_filename = get_image_filename(self, row_idx)
+        if not image_filename:
+            return
+
+        image_dir = entry_dir(self.notebook_dir, entry_id)
+        thumbnail_path = str(image_dir / thumb_name_for(image_filename))
+
+        # Apply transformation
+        if transform_func(thumbnail_path):
+            # Clear caches and refresh display
+            clear_thumb_cache_for_entry(image_dir, image_filename)
+            self.cache.invalidate_entry(entry_id)
+
+            # Refresh display (preserves current zoom level)
+            self._index.rebuild(self, self._rows)
+            self.SetVirtualSize((-1, self._index.content_height()))
+            self._refresh_changed_area(entry_id)
+
+    def _get_selected_image_row_index(self) -> Optional[int]:
+        """Get the currently selected row index if it's an image row."""
+        if not (0 <= self._sel < len(self._rows)):
+            return None
+
+        if not is_image_row(self, self._sel):
+            return None
+
+        return self._sel
+
+    def _regenerate_thumbnail(self, row_idx: int, new_max_size: int):
+        """Regenerate thumbnail for image row with new size."""
+        from ui.image_utils import make_thumbnail_file
+        from ui.image_loader import clear_thumb_cache_for_entry
+        from ui.row_utils import get_image_filename
+        from core.tree import entry_dir
+
+        row = self._rows[row_idx]
+        entry_id = row.entry_id
+
+        # Get image filename and paths
+        image_filename = get_image_filename(self, row_idx)
+        if not image_filename:
+            return
+
+        image_dir = entry_dir(self.notebook_dir, entry_id)
+
+        # Regenerate thumbnail at new size
+        make_thumbnail_file(image_dir, image_filename, max_px=new_max_size)
+
+        # Clear caches to force reload
+        clear_thumb_cache_for_entry(image_dir, image_filename)
+        self.cache.invalidate_entry(entry_id)
+
+        # Refresh display
+        self._index.rebuild(self, self._rows)
+        self.SetVirtualSize((-1, self._index.content_height()))
+        self._refresh_changed_area(entry_id)

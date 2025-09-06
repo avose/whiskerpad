@@ -4,6 +4,8 @@ import json, os, uuid, time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from core.log import Log
+
 def _read_json(p: Path, default: Any) -> Any:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -84,6 +86,7 @@ def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str =
     Returns new entry_id.
     """
     eid = _new_id()
+    Log.debug(f"create_entry({parent_id=}), {eid=}", 10)
     d = entry_dir(notebook_dir, eid)
     d.mkdir(parents=True, exist_ok=True)
 
@@ -126,12 +129,14 @@ def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str =
     return eid
 
 def load_entry(notebook_dir: str, entry_id: str) -> Dict[str, Any]:
+    Log.debug(f"load_entry({entry_id=})", 100)
     paths = entry_json_path(notebook_dir, entry_id)
     if not paths.exists():
         raise ValueError(f"entry.json for id={entry_id} not found")
     return _read_json(paths, {})
 
 def save_entry(notebook_dir: str, entry: Dict[str, Any]) -> None:
+    Log.debug(f"save_entry({entry['id']=})", 10)
     entry["updated_ts"] = int(time.time())
     paths = entry_json_path(notebook_dir, entry["id"])
     _atomic_write_json(paths, entry)
@@ -139,12 +144,14 @@ def save_entry(notebook_dir: str, entry: Dict[str, Any]) -> None:
 # ---------- Rich Text Utilities ----------
 
 def get_entry_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str, Any]]:
+    Log.debug(f"get_entry_rich_text({entry_id=})", 10)
     """Get the rich text content of an entry."""
     entry = load_entry(notebook_dir, entry_id)
     return entry.get("text", [{"content": ""}])
 
 def set_entry_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Set the rich text content of an entry."""
+    Log.debug(f"set_entry_rich_text({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
     entry["edit"] = ""  # Clear edit field when setting final text
@@ -152,6 +159,7 @@ def set_entry_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[s
 
 def get_entry_edit_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str, Any]]:
     """Get the temporary edit rich text of an entry."""
+    Log.debug(f"get_entry_edit_rich_text({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     edit_data = entry.get("edit", [])
 
@@ -167,6 +175,7 @@ def get_entry_edit_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str,
 
 def set_entry_edit_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Set the temporary edit rich text of an entry (auto-saved during editing)."""
+    Log.debug(f"set_entry_edit_rich_text({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["edit"] = rich_text
     entry["last_edit_ts"] = int(time.time())
@@ -174,6 +183,7 @@ def set_entry_edit_rich_text(notebook_dir: str, entry_id: str, rich_text: List[D
 
 def commit_entry_edit(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Commit edit rich text to final text and clear edit field."""
+    Log.debug(f"commit_entry_edit({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
     entry["edit"] = []  # Clear edit field (now empty rich text array)
@@ -182,6 +192,7 @@ def commit_entry_edit(notebook_dir: str, entry_id: str, rich_text: List[Dict[str
 
 def cancel_entry_edit(notebook_dir: str, entry_id: str) -> None:
     """Cancel editing by clearing the edit field."""
+    Log.debug(f"cancel_entry_edit({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["edit"] = []  # Clear edit field (now empty rich text array)
     save_entry(notebook_dir, entry)

@@ -43,7 +43,7 @@ def import_image_into_entry(notebook_dir: Pathish, entry_id: str, src_path: Path
     atomic_copy(src, dst)
 
     # Create/overwrite the thumbnail
-    make_thumbnail_file(entry, filename, max_px=256, jpeg_quality=85)
+    make_thumbnail_file(entry, filename, max_px=256)
     thumb = thumb_name_for(filename)
 
     token = make_img_token(filename)

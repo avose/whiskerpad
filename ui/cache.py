@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Set, Tuple
 
+from core.log import Log
 from core.tree import (
     load_entry,
     save_entry,
@@ -101,6 +102,7 @@ class NotebookCache:
     # ------------------------------------------------------------------ #
 
     def invalidate_entry(self, entry_id: str) -> None:
+        Log.debug(f"invalidate_entry({entry_id=})", 10)
         self._cache.pop(entry_id, None)
         self._dirty.discard(entry_id)
 
@@ -110,6 +112,7 @@ class NotebookCache:
         Keeps identical semantics with invalidate_entry(), but faster
         for large collapse/expand operations.
         """
+        Log.debug(f"invalidate_entries(entry_ids={','.join(entry_ids)})", 10)
         for eid in entry_ids:
             self._cache.pop(eid, None)      # entry_data + layout_data
             self._dirty.discard(eid)        # clear dirty flag if present
@@ -119,6 +122,7 @@ class NotebookCache:
         Called from GCView._on_size when the window width changes:
         keeps entry_data, drops only layout_data.
         """
+        Log.debug(f"invalidate_layout_only()", 10)
         for c in self._cache.values():
             c.pop("layout_data", None)
 
@@ -127,6 +131,7 @@ class NotebookCache:
     # ------------------------------------------------------------------ #
     def invalidate_all(self) -> None:
         """Clear entry_data, layout_data, and dirty sets."""
+        Log.debug(f"invalidate_all()", 10)
         self._cache.clear()
         self._dirty.clear()
 

@@ -4,37 +4,55 @@ import wx
 
 from ui.icons import wpIcons
 from ui.file_dialogs import choose_image_files
-
+from ui.constants import DEFAULT_BG_COLOR
 
 class Toolbar(wx.Panel):
     """
     Simple toolbar with a vertical gradient background and buttons.
-    Buttons: Open Notebook, Add Child, Text Color, Background Color.
+    Buttons: Open Notebook, Add Child, Text Color, Background Color, Zoom controls.
     """
 
     def __init__(
-            self,
-            parent: wx.Window,
-            on_open,
-            on_add_images,
-            on_fg_color,
-            on_bg_color,
-            on_copy,
-            on_paste,
-            on_cut,
-            on_delete,
+        self,
+        parent: wx.Window,
+        on_open,
+        on_add_images,
+        on_add_tab,
+        on_copy,
+        on_paste,
+        on_cut,
+        on_delete,
+        on_zoom_in,
+        on_zoom_out,
+        on_zoom_reset,
+        on_rotate_clockwise,
+        on_rotate_anticlockwise,
+        on_flip_vertical,
+        on_flip_horizontal,
+        on_fg_color,
+        on_bg_color,
+        on_search,
     ):
         super().__init__(parent, style=wx.BORDER_NONE)
 
         # Store callbacks
         self._on_open = on_open
         self._on_add_images = on_add_images
-        self._on_fg_color = on_fg_color
-        self._on_bg_color = on_bg_color
+        self._on_add_tab = on_add_tab
         self._on_copy = on_copy
         self._on_paste = on_paste
         self._on_cut = on_cut
         self._on_delete = on_delete
+        self._on_zoom_in = on_zoom_in
+        self._on_zoom_out = on_zoom_out
+        self._on_zoom_reset = on_zoom_reset
+        self._on_rotate_clockwise = on_rotate_clockwise
+        self._on_rotate_anticlockwise = on_rotate_anticlockwise
+        self._on_flip_vertical = on_flip_vertical
+        self._on_flip_horizontal = on_flip_horizontal
+        self._on_fg_color = on_fg_color
+        self._on_bg_color = on_bg_color
+        self._on_search = on_search
 
         # Initialize UI components
         self._setup_painting()
@@ -59,14 +77,34 @@ class Toolbar(wx.Panel):
         self.btn_add_images = self._create_icon_button("image_add", "Add Image(s)")
         self.btn_delete = self._create_icon_button("delete", "Delete")
 
+        # Add the new tab creation button
+        self.btn_add_tab = self._create_icon_button("tab_add", "Create Tab from Selection")
+
         # Clipboard buttons
         self.btn_copy = self._create_icon_button("page_white_copy", "Copy")
         self.btn_paste = self._create_icon_button("paste_plain", "Paste")
         self.btn_cut = self._create_icon_button("cut", "Cut")
 
+        # Zoom buttons
+        self.btn_zoom_in = self._create_icon_button("zoom_in", "Zoom In")
+        self.btn_zoom_out = self._create_icon_button("zoom_out", "Zoom Out")  
+        self.btn_zoom_reset = self._create_icon_button("zoom", "Reset Zoom")
+
+        # Transform buttons (rotate left of flip)
+        self.btn_rotate_anticlockwise = self._create_icon_button("shape_rotate_anticlockwise", "Rotate Left")
+        self.btn_rotate_clockwise = self._create_icon_button("shape_rotate_clockwise", "Rotate Right")
+        self.btn_flip_vertical = self._create_icon_button("shape_flip_vertical", "Flip Vertical")
+        self.btn_flip_horizontal = self._create_icon_button("shape_flip_horizontal", "Flip Horizontal")
+
         # Color picker sections
         self.fg_section = self._create_fg_color_section()
         self.bg_section = self._create_bg_color_section()
+
+        # Create search control
+        self.search_ctrl = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
+        self.search_ctrl.SetMinSize(wx.Size(175, 25))
+        self.search_ctrl.ShowCancelButton(True)
+        self.search_ctrl.SetToolTip(wx.ToolTip("Search Notebook"))
 
     def _create_icon_button(self, icon_name: str, tooltip: str):
         """Create a standard icon button"""
@@ -105,11 +143,11 @@ class Toolbar(wx.Panel):
             style=wx.CLRP_DEFAULT_STYLE
         )
         self.fg_color_picker.SetToolTip(wx.ToolTip("Text Color"))
+        self.fg_color_picker.Bind(wx.EVT_KEY_DOWN, self._on_color_picker_key)
 
         # Add to section sizer
         section_sizer.Add(fg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.fg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-
         return section_sizer
 
     def _create_bg_color_section(self):
@@ -129,16 +167,16 @@ class Toolbar(wx.Panel):
         # Create color picker
         self.bg_color_picker = wx.ColourPickerCtrl(
             self,
-            colour=wx.Colour(246, 252, 246),  # View background default
+            colour=DEFAULT_BG_COLOR,  # View background default
             size=wx.Size(32, 20),  # Keep it small
             style=wx.CLRP_DEFAULT_STYLE
         )
         self.bg_color_picker.SetToolTip(wx.ToolTip("Highlight Color"))
+        self.bg_color_picker.Bind(wx.EVT_KEY_DOWN, self._on_color_picker_key)
 
         # Add to section sizer
         section_sizer.Add(bg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.bg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-
         return section_sizer
 
     def _setup_layout(self):
@@ -150,12 +188,26 @@ class Toolbar(wx.Panel):
         main_sizer.Add(self.btn_open, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.btn_add_images, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.btn_delete, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-
+        main_sizer.Add(self.btn_add_tab, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        
         # Clipboard buttons
         main_sizer.AddSpacer(6)  # Small separator
         main_sizer.Add(self.btn_cut, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.btn_copy, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
         main_sizer.Add(self.btn_paste, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+
+        # Zoom buttons
+        main_sizer.AddSpacer(6)  # Small separator
+        main_sizer.Add(self.btn_zoom_out, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_zoom_reset, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_zoom_in, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+
+        # Transform buttons
+        main_sizer.AddSpacer(6)  # Small separator
+        main_sizer.Add(self.btn_rotate_anticlockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_rotate_clockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_flip_vertical, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_flip_horizontal, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
 
         # Color picker sections
         main_sizer.AddSpacer(6)  # Small separator
@@ -166,6 +218,10 @@ class Toolbar(wx.Panel):
         main_sizer.AddStretchSpacer(1)
         main_sizer.AddSpacer(6)
 
+        # Search control
+        main_sizer.Add(self.search_ctrl, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.AddSpacer(6)  # Small separator
+
         self.SetSizer(main_sizer)
 
     def _bind_events(self):
@@ -174,15 +230,47 @@ class Toolbar(wx.Panel):
         self.btn_open.Bind(wx.EVT_BUTTON, lambda evt: self._on_open(evt))
         self.btn_add_images.Bind(wx.EVT_BUTTON, lambda evt: self._on_add_images_click())
         self.btn_delete.Bind(wx.EVT_BUTTON, lambda evt: self._on_delete(evt))
+        self.btn_add_tab.Bind(wx.EVT_BUTTON, lambda evt: self._on_add_tab(evt) if self._on_add_tab else None)
 
         # Clipboard button events
         self.btn_copy.Bind(wx.EVT_BUTTON, lambda evt: self._on_copy(evt) if self._on_copy else None)
         self.btn_paste.Bind(wx.EVT_BUTTON, lambda evt: self._on_paste(evt) if self._on_paste else None)
         self.btn_cut.Bind(wx.EVT_BUTTON, lambda evt: self._on_cut(evt) if self._on_cut else None)
 
+        # Zoom button events
+        self.btn_zoom_in.Bind(wx.EVT_BUTTON, lambda evt: self._on_zoom_in(evt) if self._on_zoom_in else None)
+        self.btn_zoom_out.Bind(wx.EVT_BUTTON, lambda evt: self._on_zoom_out(evt) if self._on_zoom_out else None)
+        self.btn_zoom_reset.Bind(wx.EVT_BUTTON, lambda evt: self._on_zoom_reset(evt) if self._on_zoom_reset else None)
+
+        # Transform button events
+        self.btn_rotate_clockwise.Bind(wx.EVT_BUTTON, lambda evt: self._on_rotate_clockwise(evt) if self._on_rotate_clockwise else None)
+        self.btn_rotate_anticlockwise.Bind(wx.EVT_BUTTON, lambda evt: self._on_rotate_anticlockwise(evt) if self._on_rotate_anticlockwise else None)
+        self.btn_flip_vertical.Bind(wx.EVT_BUTTON, lambda evt: self._on_flip_vertical(evt) if self._on_flip_vertical else None)
+        self.btn_flip_horizontal.Bind(wx.EVT_BUTTON, lambda evt: self._on_flip_horizontal(evt) if self._on_flip_horizontal else None)
+
         # Color picker events
         self.fg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_fg_color_changed)
         self.bg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_bg_color_changed)
+
+        # Search control events
+        self.search_ctrl.Bind(wx.EVT_SEARCHCTRL_SEARCH_BTN, self._on_search_triggered)
+        self.search_ctrl.Bind(wx.EVT_TEXT_ENTER, self._on_search_triggered)
+
+    def _on_search_triggered(self, event):
+        """Handle search button click or Enter key."""
+        if self._on_search:
+            query = self.search_ctrl.GetValue().strip()
+            if query:
+                self._on_search(query)
+
+    def _on_color_picker_key(self, evt):
+        """Handle key events for color pickers - let Enter pass through."""
+        if evt.GetKeyCode() == wx.WXK_RETURN:
+            # Don't handle Enter - let it pass to parent/focused control
+            evt.Skip()
+        else:
+            # Handle other keys normally
+            evt.Skip()
 
     def _on_fg_color_changed(self, event):
         """Handle foreground color picker change"""
@@ -198,16 +286,9 @@ class Toolbar(wx.Panel):
 
     def _on_add_images_click(self):
         """Open a file picker and report selected image paths"""
-        try:
-            paths = choose_image_files(self, multiple=True)
-            if not paths:
-                return
-
-            if callable(self._on_add_images):
-                self._on_add_images(paths)
-
-        except Exception as e:
-            wx.LogError(f"Image selection failed: {e}")
+        paths = choose_image_files(self, multiple=True)
+        if paths and callable(self._on_add_images):
+            self._on_add_images(paths)
 
     def _on_paint(self, _evt):
         """Paint the gradient background"""
@@ -220,13 +301,7 @@ class Toolbar(wx.Panel):
 
         # Draw gradient background
         rect = wx.Rect(0, 0, w, h)
-        if hasattr(dc, 'GradientFillLinear'):
-            dc.GradientFillLinear(rect, top, bot, wx.SOUTH)
-        else:
-            # Fallback for older wxPython versions
-            dc.SetBrush(wx.Brush(top))
-            dc.SetPen(wx.Pen(top))
-            dc.DrawRectangle(rect)
+        dc.GradientFillLinear(rect, top, bot, wx.SOUTH)
 
         # Bottom border line
         line_color = wx.Colour(180, 180, 180)

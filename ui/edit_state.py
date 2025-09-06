@@ -35,7 +35,8 @@ class TextRun:
     bold: bool = False
     italic: bool = False
     color: Optional[str] = None  # hex color like "#ff0000"
-    bg: Optional[str] = None     # hex background color
+    bg: Optional[str] = None  # hex background color
+    link_target: Optional[str] = None  # NEW: entry_id for internal links
 
     def copy(self) -> TextRun:
         """Create a copy of this text run."""
@@ -44,7 +45,8 @@ class TextRun:
             bold=self.bold,
             italic=self.italic,
             color=self.color,
-            bg=self.bg
+            bg=self.bg,
+            link_target=self.link_target  # Add this line
         )
 
     def same_format(self, other: TextRun) -> bool:
@@ -52,7 +54,12 @@ class TextRun:
         return (self.bold == other.bold and
                 self.italic == other.italic and
                 self.color == other.color and
-                self.bg == other.bg)
+                self.bg == other.bg and
+                self.link_target == other.link_target)  # Add this line
+    
+    def is_link(self) -> bool:
+        """Check if this text run is a link."""
+        return self.link_target is not None
 
 class RichText:
     """Rich text model consisting of formatted text runs."""
@@ -77,7 +84,8 @@ class RichText:
                     bold=item.get("bold", False),
                     italic=item.get("italic", False),
                     color=item.get("color"),
-                    bg=item.get("bg")
+                    bg=item.get("bg"),
+                    link_target=item.get("link_target")  # Add this line
                 ))
         return cls(runs) if runs else cls()
 
@@ -94,6 +102,8 @@ class RichText:
                 item["color"] = run.color
             if run.bg:
                 item["bg"] = run.bg
+            if run.link_target:  # Add this block
+                item["link_target"] = run.link_target
             result.append(item)
         return result
 
@@ -130,26 +140,29 @@ class RichText:
 
     def insert_text(self, position: int, text: str, formatting: Optional[TextRun] = None):
         """Insert text at the given character position with optional formatting."""
-        if not text:
+        if not text and not formatting:
             return
 
         # Default formatting from adjacent character or plain
         if formatting is None:
             formatting = self._get_format_at_position(position)
 
+        # If we have a formatting TextRun but no text, use its content
+        if formatting and not text:
+            text = formatting.content
+
         # Find which run contains this position
         char_pos = 0
         for i, run in enumerate(self.runs):
             run_len = len(run.content)
-
             if char_pos + run_len >= position:
                 # Insert within this run
                 pos_in_run = position - char_pos
 
                 if formatting.same_format(run):
                     # Same formatting - just insert text
-                    run.content = (run.content[:pos_in_run] +
-                                  text +
+                    run.content = (run.content[:pos_in_run] + 
+                                  text + 
                                   run.content[pos_in_run:])
                 else:
                     # Different formatting - split the run
@@ -159,10 +172,10 @@ class RichText:
                     # Replace current run with up to 3 new runs
                     new_runs = []
                     if before:
-                        new_runs.append(TextRun(before, run.bold, run.italic, run.color, run.bg))
-                    new_runs.append(TextRun(text, formatting.bold, formatting.italic, formatting.color, formatting.bg))
+                        new_runs.append(TextRun(before, run.bold, run.italic, run.color, run.bg, run.link_target))
+                    new_runs.append(TextRun(text, formatting.bold, formatting.italic, formatting.color, formatting.bg, formatting.link_target))
                     if after:
-                        new_runs.append(TextRun(after, run.bold, run.italic, run.color, run.bg))
+                        new_runs.append(TextRun(after, run.bold, run.italic, run.color, run.bg, run.link_target))
 
                     self.runs[i:i+1] = new_runs
 
@@ -175,7 +188,7 @@ class RichText:
         if formatting.same_format(self.runs[-1]):
             self.runs[-1].content += text
         else:
-            self.runs.append(TextRun(text, formatting.bold, formatting.italic, formatting.color, formatting.bg))
+            self.runs.append(TextRun(text, formatting.bold, formatting.italic, formatting.color, formatting.bg, formatting.link_target))
 
         self._normalize()
 
@@ -313,33 +326,89 @@ class EditState:
         return self.rich_text.to_plain_text() if self.rich_text else ""
 
     def insert_text(self, text: str):
-        """Insert plain text at cursor position."""
-        if self.rich_text and text:
-            self.rich_text.insert_text(self.cursor_pos, text)
-            self.cursor_pos += len(text)
+        """Insert plain text at cursor position, ensuring links aren't split."""
+        if not self.rich_text or not text:
+            return
+
+        # Adjust cursor position to avoid inserting inside links
+        adjusted_pos = self._adjust_cursor_for_links(self.cursor_pos)
+
+        # Create formatting for new text
+        current_format = self.get_current_format()
+
+        # Insert text at adjusted position
+        self.rich_text.insert_text(adjusted_pos, text, current_format)
+
+        # Update cursor position
+        self.cursor_pos = adjusted_pos + len(text)
 
     def delete_before_cursor(self):
-        """Delete character before cursor (backspace)."""
-        if self.rich_text and self.cursor_pos > 0:
-            self.rich_text.delete_range(self.cursor_pos - 1, self.cursor_pos)
-            self.cursor_pos -= 1
+        """Delete character before cursor, or entire link if at link boundary (backspace)."""
+        if not self.rich_text or self.cursor_pos <= 0:
+            return
+
+        # Check if we're at the end of a link
+        link_run = self._get_link_at_position(self.cursor_pos - 1)
+        if link_run:
+            # We're deleting into a link - remove the entire link
+            link_boundaries = self._get_link_boundaries(self.cursor_pos - 1)
+            if link_boundaries:
+                start, end = link_boundaries
+                self.rich_text.delete_range(start, end)
+                self.cursor_pos = start
+                return
+
+        # Normal character deletion
+        self.rich_text.delete_range(self.cursor_pos - 1, self.cursor_pos)
+        self.cursor_pos -= 1
 
     def delete_after_cursor(self):
-        """Delete character after cursor (delete key)."""
-        if self.rich_text and self.cursor_pos < self.rich_text.char_count():
-            self.rich_text.delete_range(self.cursor_pos, self.cursor_pos + 1)
+        """Delete character after cursor, or entire link if at link boundary (delete key)."""
+        if not self.rich_text or self.cursor_pos >= self.rich_text.char_count():
+            return
 
-    def move_cursor(self, delta: int):
-        """Move cursor by delta characters and clear selection."""
-        if self.rich_text:
-            self.cursor_pos = max(0, min(self.rich_text.char_count(), self.cursor_pos + delta))
-            self.clear_selection()
+        # Check if we're at the start of a link
+        link_run = self._get_link_at_position(self.cursor_pos)
+        if link_run:
+            # We're deleting a link - remove the entire link
+            link_boundaries = self._get_link_boundaries(self.cursor_pos)
+            if link_boundaries:
+                start, end = link_boundaries
+                self.rich_text.delete_range(start, end)
+                # Cursor stays at same position (start of where link was)
+                return
+
+        # Normal character deletion
+        self.rich_text.delete_range(self.cursor_pos, self.cursor_pos + 1)
 
     def set_cursor_position(self, position: int):
-        """Set cursor to specific position and clear selection."""
+        """Set cursor to specific position, avoiding link interiors, and clear selection."""
         if self.rich_text:
-            self.cursor_pos = max(0, min(self.rich_text.char_count(), position))
+            position = max(0, min(self.rich_text.char_count(), position))
+            position = self._adjust_cursor_for_links(position)
+            self.cursor_pos = position
             self.clear_selection()
+
+    def move_cursor(self, delta: int):
+        """Move cursor by delta characters, skipping over link interiors, and clear selection."""
+        if not self.rich_text:
+            return
+
+        new_pos = max(0, min(self.rich_text.char_count(), self.cursor_pos + delta))
+
+        # Check if the new position would be inside a link
+        link_boundaries = self._get_link_boundaries(new_pos)
+        if link_boundaries:
+            start, end = link_boundaries
+            # If we would land inside a link, jump to the appropriate boundary
+            if start < new_pos < end:
+                if delta < 0:  # Moving left - go to start of link
+                    new_pos = start
+                else:  # Moving right - go to end of link
+                    new_pos = end
+
+        self.cursor_pos = new_pos
+        self.clear_selection()
 
     def has_selection(self) -> bool:
         """Check if there's an active text selection."""
@@ -511,3 +580,77 @@ class EditState:
             bg_color = wx.Colour(255, 255, 255)  # Default white
 
         toolbar.set_bg_color(bg_color)
+
+    def insert_link(self, entry_id: str, display_text: str):
+        """Insert a link at the cursor position."""
+        if not self.rich_text:
+            return
+
+        # Create a link TextRun with blue color and current formatting
+        link_run = TextRun(
+            content=display_text,
+            bold=self.current_bold,
+            italic=self.current_italic,
+            color="#0000ff",  # Blue color for links
+            bg=self.current_bg,
+            link_target=entry_id
+        )
+
+        # Insert the link run at cursor position
+        self.rich_text.insert_text(self.cursor_pos, "", link_run)
+        self.cursor_pos += len(display_text)
+
+    def _get_link_at_position(self, position: int) -> Optional[TextRun]:
+        """Get the link TextRun at the given position, or None if not in a link."""
+        if not self.rich_text or position < 0:
+            return None
+
+        char_pos = 0
+        for run in self.rich_text.runs:
+            run_end = char_pos + len(run.content)
+            if char_pos <= position < run_end and run.link_target:
+                return run
+            char_pos = run_end
+        return None
+
+    def _get_link_boundaries(self, position: int) -> Optional[tuple[int, int]]:
+        """Get the start and end positions of the link containing the given position."""
+        if not self.rich_text or position < 0:
+            return None
+
+        char_pos = 0
+        for run in self.rich_text.runs:
+            run_end = char_pos + len(run.content)
+            if char_pos <= position < run_end and run.link_target:
+                return (char_pos, run_end)
+            char_pos = run_end
+        return None
+
+    def _adjust_cursor_for_links(self, position: int) -> int:
+        """Adjust cursor position to avoid placing it inside links."""
+        if not self.rich_text:
+            return position
+
+        # Check if position is inside a link
+        link_boundaries = self._get_link_boundaries(position)
+        if link_boundaries:
+            start, end = link_boundaries
+            # If cursor would be inside link, move it to the end
+            if start < position < end:
+                return end
+
+        return position
+
+    def get_text_run_at_position(self, position: int) -> Optional[TextRun]:
+        """Get the TextRun that contains the given character position."""
+        if not self.rich_text or position < 0:
+            return None
+
+        char_pos = 0
+        for run in self.rich_text.runs:
+            run_end = char_pos + len(run.content)
+            if char_pos <= position < run_end:
+                return run
+            char_pos = run_end
+
+        return None

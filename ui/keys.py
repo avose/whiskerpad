@@ -1,3 +1,5 @@
+# ui/keys.py
+
 from __future__ import annotations
 
 import wx
@@ -6,56 +8,35 @@ from ui.scroll import visible_range
 from ui.select import select_row, select_entry_id
 from ui.row import has_children
 from ui.notebook_text import rich_text_from_entry
-from core.tree_utils import (
-    add_sibling_after,
-    indent_under_prev_sibling,
-    outdent_to_parent_sibling,
-    toggle_collapsed,
-)
+from ui.edit_state import find_word_boundaries
 
 # ------------ Multi-line text navigation helpers ------------
 
 def _move_cursor_up_line(edit_state, plain_text):
     """Move cursor up one line, preserving column position when possible."""
     cursor_pos = edit_state.cursor_pos
-
-    # Split text into lines
     lines = plain_text.split('\n')
-
-    # Find current line and column
     current_line, current_col = _get_line_col_from_position(plain_text, cursor_pos)
 
-    # Can't move up from first line
     if current_line <= 0:
         return None
 
-    # Move to previous line, same column (or end of line if shorter)
     prev_line = lines[current_line - 1]
     target_col = min(current_col, len(prev_line))
-
-    # Calculate new cursor position
     new_pos = _get_position_from_line_col(lines, current_line - 1, target_col)
     return new_pos
 
 def _move_cursor_down_line(edit_state, plain_text):
     """Move cursor down one line, preserving column position when possible."""
     cursor_pos = edit_state.cursor_pos
-
-    # Split text into lines
     lines = plain_text.split('\n')
-
-    # Find current line and column
     current_line, current_col = _get_line_col_from_position(plain_text, cursor_pos)
 
-    # Can't move down from last line
     if current_line >= len(lines) - 1:
         return None
 
-    # Move to next line, same column (or end of line if shorter)
     next_line = lines[current_line + 1]
     target_col = min(current_col, len(next_line))
-
-    # Calculate new cursor position
     new_pos = _get_position_from_line_col(lines, current_line + 1, target_col)
     return new_pos
 
@@ -63,15 +44,13 @@ def _get_line_col_from_position(text, pos):
     """Get line and column numbers from character position."""
     lines = text.split('\n')
     current_pos = 0
-
     for line_idx, line in enumerate(lines):
         line_end = current_pos + len(line)
         if pos <= line_end:
             col = pos - current_pos
             return line_idx, col
-        current_pos = line_end + 1  # +1 for the newline character
+        current_pos = line_end + 1
 
-    # Position is at the very end
     return len(lines) - 1, len(lines[-1]) if lines else 0
 
 def _get_position_from_line_col(lines, line_idx, col):
@@ -80,11 +59,9 @@ def _get_position_from_line_col(lines, line_idx, col):
         return None
 
     pos = 0
-    # Add lengths of all previous lines (including newlines)
     for i in range(line_idx):
-        pos += len(lines[i]) + 1  # +1 for newline
+        pos += len(lines[i]) + 1
 
-    # Add column position within target line
     pos += min(col, len(lines[line_idx]))
     return pos
 
@@ -92,15 +69,13 @@ def _get_cursor_line_and_column(text: str, cursor_pos: int) -> tuple[int, int]:
     """Get the line index and column position of the cursor."""
     lines = text.split('\n')
     current_pos = 0
-
     for line_idx, line in enumerate(lines):
         line_end = current_pos + len(line)
         if cursor_pos <= line_end:
             col = cursor_pos - current_pos
             return line_idx, col
-        current_pos = line_end + 1  # +1 for newline character
+        current_pos = line_end + 1
 
-    # Cursor at very end
     return len(lines) - 1, len(lines[-1]) if lines else 0
 
 def _handle_single_line_arrow_navigation(view, key_code) -> bool:
@@ -108,66 +83,52 @@ def _handle_single_line_arrow_navigation(view, key_code) -> bool:
     current_row = view._rows[view._sel]
     current_layout = view.cache.layout(current_row.entry_id) or {}
 
-    # If current row is an image, don't try to move cursor within it
     if current_layout.get("is_img"):
         if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
             return _move_to_previous_row(view)
         elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
             return _move_to_next_row(view)
 
-    # For regular text rows, move between rows
     if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         return _move_to_previous_row(view)
     elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         return _move_to_next_row(view)
+
     return False
 
 def _move_to_previous_row(view) -> bool:
     """Move selection to previous row, entering edit mode only if not an image row."""
     if view._sel > 0:
-        # Save current edit first
         view.exit_edit_mode(save=True)
-
-        # Move to previous row
         select_row(view, view._sel - 1)
 
-        # Check if the new row is an image row
         prev_row = view._rows[view._sel]
         layout = view.cache.layout(prev_row.entry_id) or {}
-
         if layout.get("is_img"):
-            # Image row - just select it, don't enter edit mode
             return True
 
-        # Text row - enter edit mode at end of text
         prev_entry = view._get(prev_row.entry_id)
         prev_rich_text = rich_text_from_entry(prev_entry)
-        cursor_pos = prev_rich_text.char_count()  # End of text
-
+        cursor_pos = prev_rich_text.char_count()
         view.enter_edit_mode(view._sel, cursor_pos)
         return True
+
     return False
 
 def _move_to_next_row(view) -> bool:
     """Move selection to next row, entering edit mode only if not an image row."""
     if view._sel < len(view._rows) - 1:
-        # Save current edit first
         view.exit_edit_mode(save=True)
-
-        # Move to next row
         select_row(view, view._sel + 1)
 
-        # Check if the new row is an image row
         next_row = view._rows[view._sel]
         layout = view.cache.layout(next_row.entry_id) or {}
-
         if layout.get("is_img"):
-            # Image row - just select it, don't enter edit mode
             return True
 
-        # Text row - enter edit mode at beginning
         view.enter_edit_mode(view._sel, 0)
         return True
+
     return False
 
 def _update_cursor_position(view, new_pos: int):
@@ -180,15 +141,15 @@ def _update_cursor_position(view, new_pos: int):
 # ------------ Key event handlers ------------
 
 def handle_key_event(view, evt: wx.KeyEvent) -> bool:
-    """
-    Centralized key routing for GCView.
-    Returns True if the event was handled (selection moved, model changed, etc.).
-    """
-    # Handle edit mode keys first
+    """Centralized key routing for GCView."""
+    if evt.ControlDown():
+        code = evt.GetKeyCode()
+        if code in (ord('C'), ord('V'), ord('X')):
+            return _handle_clipboard_keys(view, evt)
+
     if view._edit_state.active:
         return handle_edit_mode_keys(view, evt)
 
-    # Handle navigation mode keys
     return handle_navigation_keys(view, evt)
 
 # ------------ Edit key handlers ------------
@@ -197,7 +158,6 @@ def handle_edit_mode_keys(view, evt: wx.KeyEvent) -> bool:
     """Handle all keyboard input during text editing."""
     code = evt.GetKeyCode()
 
-    # Route to specific handlers
     if code == wx.WXK_ESCAPE:
         return _handle_escape_key(view)
 
@@ -219,10 +179,6 @@ def handle_edit_mode_keys(view, evt: wx.KeyEvent) -> bool:
     if code in (wx.WXK_BACK, wx.WXK_DELETE):
         return _handle_delete_keys(view, evt)
 
-    if evt.ControlDown() and code in (ord('C'), ord('V'), ord('X')):
-        return _handle_clipboard_keys(view, evt)
-
-    # Handle text input
     return _handle_text_input(view, evt)
 
 def _handle_escape_key(view) -> bool:
@@ -231,57 +187,62 @@ def _handle_escape_key(view) -> bool:
     return True
 
 def _handle_enter_key(view, evt) -> bool:
-    """Handle Enter key - line break or new sibling."""
+    """Handle Enter key using FlatTree."""
     if evt.ShiftDown():
+        # Add line break - may change row height
         view.insert_text_at_cursor("\n")
+        view.SetVirtualSize((-1, view._index.content_height()))
+        from ui.scroll import soft_ensure_visible
+        soft_ensure_visible(view, view._edit_state.row_idx)
         return True
     else:
-        # Create new sibling
+        # Create new sibling using FlatTree
         current_entry_id = view._edit_state.entry_id
         view.exit_edit_mode(save=True)
-
-        new_id = add_sibling_after(view.notebook_dir, current_entry_id)
+        
+        # Use FlatTree for sibling creation
+        new_id = view.flat_tree.create_sibling_after(current_entry_id)
+        
         if new_id:
-            current_entry = view._get(current_entry_id)
-            parent_id = current_entry.get("parent_id")
-            view.add_node_incremental(parent_id, new_id, current_entry_id)
-
+            # Find and start editing the new node immediately
             for i, row in enumerate(view._rows):
                 if row.entry_id == new_id:
                     view.enter_edit_mode(i, 0)
+                    from ui.scroll import soft_ensure_visible
+                    soft_ensure_visible(view, i)
                     break
+        
         return True
 
 def _handle_tab_key(view, evt) -> bool:
-    """Handle Tab key - indent/outdent while staying in edit mode."""
+    """Handle Tab key using FlatTree."""
     current_entry_id = view._edit_state.entry_id
     current_cursor_pos = view._edit_state.cursor_pos
-    
+
     # Save the current edit content
     if view._edit_state.rich_text:
         rich_data = view._edit_state.rich_text.to_storage()
         view.cache.set_edit_rich_text(current_entry_id, rich_data)
-    
-    # Perform the indent/outdent operation
+
+        # CRITICAL: Force immediate persistence to disk
+        from core.tree import commit_entry_edit
+        commit_entry_edit(view.notebook_dir, current_entry_id, rich_data)
+
+    # Perform indent/outdent using FlatTree
     success = False
     if evt.ShiftDown():
-        success = outdent_to_parent_sibling(view.notebook_dir, current_entry_id)
+        success = view.flat_tree.outdent_entry(current_entry_id)
     else:
-        success = indent_under_prev_sibling(view.notebook_dir, current_entry_id)
-    
+        success = view.flat_tree.indent_entry(current_entry_id)
+
     if success:
-        # Temporarily exit edit mode and rebuild view
-        view.exit_edit_mode(save=False)  # Don't save again, we already saved above
-        view.rebuild()
-        
         # Find the entry in its new position and re-enter edit mode
         for i, row in enumerate(view._rows):
             if row.entry_id == current_entry_id:
-                # Re-enter edit mode at the same cursor position
                 view.enter_edit_mode(i, current_cursor_pos)
                 view.select_entry(current_entry_id, ensure_visible=True)
                 break
-    
+
     return True
 
 def _handle_cursor_keys(view, evt) -> bool:
@@ -313,6 +274,8 @@ def _handle_cursor_keys(view, evt) -> bool:
             view.move_cursor(1)
         return True
 
+    return False
+
 def _handle_vertical_keys(view, evt) -> bool:
     """Handle up/down arrow keys for multi-line text and inter-row navigation."""
     if not view._edit_state.active or not view._edit_state.rich_text:
@@ -332,25 +295,21 @@ def _handle_vertical_keys(view, evt) -> bool:
 
     if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         if line_idx == 0:
-            # At first line - move to previous row
             return _move_to_previous_row(view)
         else:
-            # Move cursor up within multi-line text
             new_pos = _move_cursor_up_line(view._edit_state, plain_text)
             if new_pos is not None:
                 _update_cursor_position(view, new_pos)
-                return True
+            return True
 
     elif code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         if line_idx == len(lines) - 1:
-            # At last line - move to next row
             return _move_to_next_row(view)
         else:
-            # Move cursor down within multi-line text
             new_pos = _move_cursor_down_line(view._edit_state, plain_text)
             if new_pos is not None:
                 _update_cursor_position(view, new_pos)
-                return True
+            return True
 
     return False
 
@@ -380,7 +339,7 @@ def _handle_home_end_keys(view, evt) -> bool:
                 view._edit_state.clear_selection()
                 view.set_cursor_position(end_pos)
             view._refresh_edit_row()
-            return True
+        return True
 
     return False
 
@@ -405,7 +364,7 @@ def _handle_delete_keys(view, evt) -> bool:
     return False
 
 def _handle_clipboard_keys(view, evt) -> bool:
-    """Handle Ctrl+C/V/X clipboard operations."""
+    """Handle Ctrl+C/V/X clipboard operations in both edit and navigation modes."""
     code = evt.GetKeyCode()
 
     if code == ord('C'):
@@ -457,10 +416,16 @@ def _handle_text_input(view, evt) -> bool:
 
 def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
     """Handle keyboard input when not in edit mode (tree navigation)."""
+    code = evt.GetKeyCode()
+
+    if code == wx.WXK_ESCAPE:
+        return _handle_nav_escape_key(view)
+
+    if code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+        return _handle_nav_enter_key(view)
+
     if not view._rows:
         return False
-
-    code = evt.GetKeyCode()
 
     if code == wx.WXK_TAB:
         return _handle_nav_tab_keys(view, evt)
@@ -477,16 +442,30 @@ def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
     if code == wx.WXK_SPACE:
         return _handle_nav_space_key(view)
 
-    if code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
-        return _handle_nav_enter_key(view)
-
     if code in (wx.WXK_BACK, wx.WXK_DELETE):
         return _handle_nav_delete_keys(view, evt)
 
     return False
 
+def _handle_nav_escape_key(view) -> bool:
+    """Handle Escape key in navigation mode - clear cut state and bookmark source."""
+    cleared_something = False
+
+    if view._cut_entry_id:
+        view._cut_entry_id = None
+        view.Refresh()
+        view.SetStatusText("Cut selection cleared")
+        cleared_something = True
+
+    if view._bookmark_source_id:
+        view.clear_bookmark_source()
+        view.SetStatusText("Bookmark source cleared")
+        cleared_something = True
+
+    return cleared_something
+
 def _handle_nav_tab_keys(view, evt) -> bool:
-    """Handle Tab/Shift+Tab for indent/outdent in navigation mode."""
+    """Handle Tab/Shift+Tab using FlatTree."""
     sel = view._sel
     if not (0 <= sel < len(view._rows)):
         return False
@@ -494,12 +473,16 @@ def _handle_nav_tab_keys(view, evt) -> bool:
     cur_id = view._rows[sel].entry_id
 
     if evt.ShiftDown():
-        success = outdent_to_parent_sibling(view.notebook_dir, cur_id)
+        # Outdent - but don't let top-level entries (level 0) outdent further
+        current_row = view._rows[sel]
+        if current_row.level == 0:
+            return False  # Can't outdent children of hidden root
+
+        success = view.flat_tree.outdent_entry(cur_id)
     else:
-        success = indent_under_prev_sibling(view.notebook_dir, cur_id)
+        success = view.flat_tree.indent_entry(cur_id)
 
     if success:
-        view.rebuild()
         view.select_entry(cur_id, ensure_visible=False)
 
     return True
@@ -513,12 +496,11 @@ def _handle_nav_arrow_keys(view, evt) -> bool:
     if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         if sel > 0:
             select_row(view, sel - 1)
-            return True
-
+        return True
     elif code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         if sel < n - 1:
             select_row(view, sel + 1)
-            return True
+        return True
 
     return False
 
@@ -533,14 +515,13 @@ def _handle_nav_page_keys(view, evt) -> bool:
         target = first - 1 if sel == first and first > 0 else first
         if 0 <= target < n and target != sel:
             select_row(view, target)
-            return True
-
+        return True
     elif code == wx.WXK_PAGEDOWN:
         _, last = visible_range(view)
         target = sel + 1 if sel == last and sel < n - 1 else last
         if 0 <= target < n and target != sel:
             select_row(view, target)
-            return True
+        return True
 
     return False
 
@@ -553,67 +534,75 @@ def _handle_nav_home_end_keys(view, evt) -> bool:
     if code == wx.WXK_HOME:
         if sel != 0 and n > 0:
             select_row(view, 0)
-            return True
-
+        return True
     elif code == wx.WXK_END:
         if n > 0 and sel != n - 1:
             select_row(view, n - 1)
-            return True
+        return True
 
     return False
 
 def _handle_nav_space_key(view) -> bool:
-    """Handle Space key to toggle collapse/expand."""
+    """Handle Space key using FlatTree."""
     sel = view._sel
     if not (0 <= sel < len(view._rows)):
         return False
 
     row = view._rows[sel]
     if has_children(view, row):
-        toggle_collapsed(view.notebook_dir, row.entry_id)
-        view.invalidate_cache(row.entry_id)
-        view.rebuild()
+        view.flat_tree.toggle_collapse(row.entry_id)
         return True
 
     return False
 
 def _handle_nav_enter_key(view) -> bool:
-    """Handle Enter key to add sibling after current selection."""
+    """Handle Enter key using FlatTree."""
+    if len(view._rows) == 0:
+        # Handle empty notebook case
+        from core.tree import get_root_ids, create_node
+        root_ids = get_root_ids(view.notebook_dir)
+        if root_ids:
+            new_id = create_node(view.notebook_dir, parent_id=root_ids[0], title="")
+            if new_id:
+                view.rebuild()
+                if view._rows:
+                    view.enter_edit_mode(0, 0)
+                return True
+
     sel = view._sel
     if not (0 <= sel < len(view._rows)):
         return False
 
     cur_id = view._rows[sel].entry_id
-    new_id = add_sibling_after(view.notebook_dir, cur_id)
-
+    
+    # Use FlatTree for sibling creation
+    new_id = view.flat_tree.create_sibling_after(cur_id)
+    
     if new_id:
-        current_entry = view._get(cur_id)
-        parent_id = current_entry.get("parent_id")
-        view.add_node_incremental(parent_id, new_id, cur_id)
-
+        # Find and start editing the new node immediately
         for i, row in enumerate(view._rows):
             if row.entry_id == new_id:
                 view.enter_edit_mode(i, 0)
+                from ui.scroll import soft_ensure_visible
+                soft_ensure_visible(view, i)
                 break
-        return True
 
-    return False
+    return True
 
 def _handle_nav_delete_keys(view, evt) -> bool:
     """Handle Delete/Backspace keys to delete current row."""
     code = evt.GetKeyCode()
-    
     if code not in (wx.WXK_DELETE, wx.WXK_BACK):
         return False
-    
+
     sel = view._sel
     if not (0 <= sel < len(view._rows)):
-        return False  # No valid selection
-    
+        return False
+
     # Get the main frame and call its delete method
     main_frame = wx.GetApp().GetTopWindow()
     if hasattr(main_frame, '_on_delete'):
         main_frame._on_delete()
         return True
-    
+
     return False
