@@ -7,48 +7,44 @@ from typing import List, Optional, Callable
 
 from core.log import Log
 from ui.icons import wpIcons
+from ui.decorators import check_read_only
 
 
 @dataclass
 class TabInfo:
-    entry_id: str
-    display_text: str
-    notebook_path: str
-    color: wx.Colour = None
-
-    def __post_init__(self):
-        # Truncate display text if too long
-        if len(self.display_text) > 15:
-            self.display_text = self.display_text[:12] + "..."
+    def __init__(self, entry_id: str, display_text: str, color=None):
+        self.entry_id = entry_id
+        self.display_text = display_text
         
-        # Set default color if none provided
-        if self.color is None:
-            self.color = wx.Colour(200, 200, 200)
+        # Ensure color is always a wx.Colour object
+        if color is None:
+            self.color = wx.Colour(200, 200, 200)  # Default gray
+        elif isinstance(color, (list, tuple)):
+            if len(color) == 3:
+                self.color = wx.Colour(color[0], color[1], color[2])
+            else:
+                raise ValueError(f"Invalid color tuple length: {len(color)}, expected 3")
+        elif isinstance(color, wx.Colour):
+            self.color = color
+        else:
+            raise TypeError(f"Invalid color type: {type(color)}")
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for serialization."""
         return {
             "entry_id": self.entry_id,
             "display_text": self.display_text,
-            "notebook_path": self.notebook_path,
-            "color": {
-                "r": self.color.Red(),
-                "g": self.color.Green(), 
-                "b": self.color.Blue()
-            }
+            "color": [self.color.Red(), self.color.Green(), self.color.Blue()]  # Always serialize as list!
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> 'TabInfo':
-        """Create TabInfo from dictionary loaded from JSON."""
-        color_data = data.get("color", {"r": 200, "g": 200, "b": 200})
-        color = wx.Colour(color_data["r"], color_data["g"], color_data["b"])
-        
+        """Create TabInfo from dictionary."""
+        # Let it crash if required keys are missing - no defensive gets!
         return cls(
-            entry_id=data["entry_id"],
-            display_text=data["display_text"],
-            notebook_path=data["notebook_path"],
-            color=color
+            entry_id=data["entry_id"],  # Will KeyError if missing - GOOD!
+            display_text=data["display_text"],  # Will KeyError if missing - GOOD!
+            color=data["color"]  # Will be None if missing, handled by __init__
         )
 
 class TabsPanel(wx.Panel):
@@ -95,7 +91,13 @@ class TabsPanel(wx.Panel):
         
         self._setup_drawing()
         self._bind_events()
-    
+
+    def is_read_only(self) -> bool:
+        """Check if in read-only mode"""
+        app = wx.GetApp()
+        main_frame = app.GetTopWindow()
+        return main_frame.is_read_only()
+
     def _setup_drawing(self):
         """Setup drawing properties."""
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
@@ -112,6 +114,7 @@ class TabsPanel(wx.Panel):
         self.Bind(wx.EVT_LEAVE_WINDOW, self._on_leave)
         self.Bind(wx.EVT_MOUSEWHEEL, self._on_mouse_wheel)
 
+    @check_read_only
     def _on_right_down(self, evt: wx.MouseEvent):
         """Handle right-click for context menu."""
         pos = evt.GetPosition()
@@ -141,6 +144,7 @@ class TabsPanel(wx.Panel):
         dc.SelectObject(wx.NullBitmap)
         return bitmap
 
+    @check_read_only
     def _show_tab_context_menu(self, tab_idx: int, pos: wx.Point):
         """Show context menu for a tab."""
         if not (0 <= tab_idx < len(self.tabs)):
@@ -217,6 +221,7 @@ class TabsPanel(wx.Panel):
         # Clean up color map
         del self._color_map
 
+    @check_read_only
     def _on_rename_tab(self, evt):
         """Handle rename tab menu selection."""
         tab_idx = self.context_tab_idx
@@ -230,6 +235,7 @@ class TabsPanel(wx.Panel):
             if self.on_tab_changed:
                 self.on_tab_changed()
 
+    @check_read_only
     def _on_remove_tab(self, evt):
         """Handle remove tab menu selection."""
         tab_idx = self.context_tab_idx
@@ -259,6 +265,7 @@ class TabsPanel(wx.Panel):
 
         dlg.Destroy()
 
+    @check_read_only
     def _on_set_tab_color(self, evt):
         """Handle tab color selection."""
         # Remove defensive programming - let it fail loudly
@@ -292,21 +299,19 @@ class TabsPanel(wx.Panel):
         dlg.Destroy()
         return result
 
-    def _entry_exists(self, entry_id: str, notebook_path: str) -> bool:
-        """Check if an entry still exists in the notebook."""
+    def _entry_exists(self, entry_id: str) -> bool:
+        """Check if an entry still exists in the current notebook."""
         try:
             # Get the main frame to access the current notebook
             main_frame = wx.GetApp().GetTopWindow()
-            if (hasattr(main_frame, '_current_note_panel') and 
-                main_frame._current_note_panel and
-                main_frame.current_notebook_path == notebook_path):
+            if (hasattr(main_frame, '_current_note_panel') and
+                main_frame._current_note_panel):
                 # Use the view's cache to check if entry exists
                 main_frame._current_note_panel.view._get(entry_id)
                 return True
         except Exception:
             pass
         return False
-
 
     def _calculate_tab_height(self, text: str) -> int:
         """Calculate tab height needed for rotated text."""
@@ -436,7 +441,7 @@ class TabsPanel(wx.Panel):
         base_color = tab.color if tab.color else wx.Colour(200, 200, 200)
 
         # Check if the tab target still exists
-        target_exists = self._entry_exists(tab.entry_id, tab.notebook_path)
+        target_exists = self._entry_exists(tab.entry_id)
 
         # Determine colors and font based on state
         if is_selected:
@@ -541,7 +546,7 @@ class TabsPanel(wx.Panel):
             
             if self.on_tab_click:
                 tab = self.tabs[tab_idx]
-                self.on_tab_click(tab.entry_id, tab.notebook_path)
+                self.on_tab_click(tab.entry_id)
     
     def _on_motion(self, evt: wx.MouseEvent):
         """Handle mouse motion for hover effects."""
@@ -634,13 +639,13 @@ class TabsPanel(wx.Panel):
         self.Refresh()
     
     # Public API methods
-    def add_tab(self, entry_id: str, display_text: str, notebook_path: str):
+    def add_tab(self, entry_id: str, display_text: str):
         """Add a new tab."""
         # Truncate display text if too long
         if len(display_text) > 15:
             display_text = display_text[:12] + "..."
         
-        tab = TabInfo(entry_id, display_text, notebook_path)
+        tab = TabInfo(entry_id, display_text)
         self.tabs.append(tab)
         self.Refresh()
     

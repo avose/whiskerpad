@@ -61,7 +61,7 @@ class Toolbar(wx.Panel):
         self._bind_events()
 
         # Set minimum size
-        self.SetMinSize((-1, 40))
+        self.SetMinSize((-1, 32))
 
     def _setup_painting(self):
         """Configure custom painting for gradient background"""
@@ -73,7 +73,7 @@ class Toolbar(wx.Panel):
     def _create_controls(self):
         """Create all toolbar controls"""
         # Main action buttons
-        self.btn_open = self._create_icon_button("book_add", "Open Notebook")
+        self.btn_open = self._create_icon_button("book_open", "Open Notebook")
         self.btn_add_images = self._create_icon_button("image_add", "Add Image(s)")
         self.btn_delete = self._create_icon_button("delete", "Delete")
 
@@ -185,42 +185,48 @@ class Toolbar(wx.Panel):
 
         # Left side - main buttons
         main_sizer.AddSpacer(2)
-        main_sizer.Add(self.btn_open, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_add_images, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_delete, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_add_tab, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        main_sizer.Add(self.btn_open, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
+        main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.btn_add_images, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_delete, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_add_tab, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
         
         # Clipboard buttons
-        main_sizer.AddSpacer(6)  # Small separator
-        main_sizer.Add(self.btn_cut, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_copy, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_paste, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
+        main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.btn_cut, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_copy, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_paste, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
 
         # Zoom buttons
-        main_sizer.AddSpacer(6)  # Small separator
-        main_sizer.Add(self.btn_zoom_out, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_zoom_reset, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_zoom_in, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
+        main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.btn_zoom_out, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_zoom_reset, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_zoom_in, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
 
         # Transform buttons
-        main_sizer.AddSpacer(6)  # Small separator
-        main_sizer.Add(self.btn_rotate_anticlockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_rotate_clockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_flip_vertical, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.btn_flip_horizontal, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
+        main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.btn_rotate_anticlockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_rotate_clockwise, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_flip_vertical, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.btn_flip_horizontal, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
 
         # Color picker sections
-        main_sizer.AddSpacer(6)  # Small separator
-        main_sizer.Add(self.fg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.Add(self.bg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+        separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
+        main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.fg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.Add(self.bg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
 
         # Right side - stretch spacer
         main_sizer.AddStretchSpacer(1)
-        main_sizer.AddSpacer(6)
+        main_sizer.AddSpacer(2)
 
         # Search control
-        main_sizer.Add(self.search_ctrl, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
-        main_sizer.AddSpacer(6)  # Small separator
+        main_sizer.Add(self.search_ctrl, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
+        main_sizer.AddSpacer(2)
 
         self.SetSizer(main_sizer)
 

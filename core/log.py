@@ -1,15 +1,18 @@
 ################################################################################################
 
 '''
+
 Copyright 2025 Aaron Vose (avose@aaronvose.net)
 
 Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
 
 This file holds the code for the info / debug logger.
+
 '''
 
 ################################################################################################
 
+import inspect
 from datetime import datetime
 
 ################################################################################################
@@ -26,13 +29,22 @@ class LogManager():
 
     def add(self, text: str):
         now = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
-        #print(now, text)
         LogManager.__log.append((now, text))
         return
 
-    def debug(self, text: str, level:int):
+    def debug(self, text: str, level: int):
         if self.verbosity >= level:
-            self.add("(debug-#%d) %s" % (level, text))
+            # Get caller's filename automatically
+            stack = inspect.stack()
+            if len(stack) > 1:
+                caller_frame = stack[1]
+                filename = caller_frame.filename.split('/')[-1]  # Just filename, not full path
+            else:
+                filename = "unknown"
+            
+            # Format: [filename] message (removed debug level)
+            formatted_msg = f"[{filename}] {text}"
+            self.add(formatted_msg)
         return
 
     def get(self, index: int = None):

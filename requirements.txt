@@ -1,2 +1,4 @@
 # WhiskerPad Core Requirements
 wxPython>=4.2.3
+gitpython>=3.1.45
+PyMuPDF>=1.23.0

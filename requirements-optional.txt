@@ -1,2 +1,0 @@
-# Optional PDF import support
-PyMuPDF>=1.23.0

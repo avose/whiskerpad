@@ -24,6 +24,7 @@ from core.tree import (
 from ui.types import Row
 from ui.scroll import soft_ensure_visible
 from ui.model import update_tree_incremental
+from ui.decorators import check_read_only
 
 
 __all__ = ["FlatTree"]
@@ -38,7 +39,46 @@ class FlatTree:
     def __init__(self, view):
         self.view = view
         self.notebook_dir = view.notebook_dir
-    
+        # In-memory collapsed state for read-only mode.
+        self._transient_collapsed = {}
+
+    def is_read_only(self) -> bool:
+        """Check if in read-only mode"""
+        return self.view.is_read_only()
+
+    def enter_read_only_mode(self):
+        """Enter read-only mode - initialize transient collapsed state"""
+        # Copy current persistent collapsed state to transient
+        self._transient_collapsed = {}
+
+        # Load current collapsed states from all visible entries
+        for row in self.view._rows:
+            try:
+                entry = self.view._get(row.entry_id)
+                is_collapsed = entry.get("collapsed", False)
+                if is_collapsed:
+                    self._transient_collapsed[row.entry_id] = True
+            except:
+                pass
+
+    def exit_read_only_mode(self):
+        """Exit read-only mode - discard transient state"""
+        self._transient_collapsed = {}
+
+    def is_collapsed(self, entry_id: str) -> bool:
+        """Check if entry is collapsed, using transient state in read-only mode"""
+        if self.view.is_read_only():
+            # In read-only mode, check transient state first
+            return self._transient_collapsed.get(entry_id, False)
+        else:
+            # Normal mode - check persistent state
+            try:
+                entry = self.view._get(entry_id)
+                return entry.get("collapsed", False)
+            except:
+                return False
+
+    @check_read_only
     def create_sibling_after(self, target_id: str, title: str = "") -> str:
         """Create sibling after target with proper descendant handling."""
         # 1. Create in persistent tree
@@ -66,6 +106,7 @@ class FlatTree:
         
         return new_id
     
+    @check_read_only
     def create_child_under(self, parent_id: str, title: str = "", index: Optional[int] = None) -> str:
         """Create child under parent at specified index (or end)."""
         new_id = create_node(self.notebook_dir, parent_id=parent_id, title=title, insert_index=index)
@@ -86,6 +127,7 @@ class FlatTree:
         self._update_after_insertion(insert_idx, new_row)
         return new_id
     
+    @check_read_only
     def move_entry_after(self, source_id: str, target_id: str) -> bool:
         """Move source entry to be after target."""
         if not move_entry_after(self.notebook_dir, source_id, target_id):
@@ -95,6 +137,7 @@ class FlatTree:
         self.view.rebuild()
         return True
     
+    @check_read_only
     def delete_entry(self, entry_id: str) -> bool:
         """
         Delete the entry and all descendants, including disk cleanup,
@@ -159,6 +202,7 @@ class FlatTree:
             print(f"Failed to delete entry {entry_id}: {e}")
             return False
     
+    @check_read_only
     def indent_entry(self, entry_id: str) -> bool:
         """Indent entry under previous sibling."""
         if not indent_under_prev_sibling(self.notebook_dir, entry_id):
@@ -168,6 +212,7 @@ class FlatTree:
         self._refresh_hierarchy_change(entry_id)
         return True
     
+    @check_read_only
     def outdent_entry(self, entry_id: str) -> bool:
         """Outdent entry to parent level."""
         if not outdent_to_parent_sibling(self.notebook_dir, entry_id):
@@ -177,17 +222,41 @@ class FlatTree:
         return True
     
     def toggle_collapse(self, entry_id: str) -> bool:
-        """Toggle collapse with incremental flat list update."""
-        toggle_collapsed(self.notebook_dir, entry_id)
-        
-        # Use existing incremental update logic from model.py
-        self.view.invalidate_subtree_cache(entry_id)
-        self.view._rows = update_tree_incremental(self.notebook_dir, self.view._rows, entry_id)
-        self.view._index.rebuild(self.view, self.view._rows)
-        self.view.SetVirtualSize((-1, self.view._index.content_height()))
-        self.view._refresh_changed_area(entry_id)
-        return True
-    
+        """Toggle collapse with read-only awareness"""
+        if self.view.is_read_only():
+            # In read-only mode - update transient state only
+            current_state = self._transient_collapsed.get(entry_id, False)
+            self._transient_collapsed[entry_id] = not current_state
+
+            # Update UI using existing incremental update logic
+            self.view.invalidate_subtree_cache(entry_id)
+            self.view._rows = update_tree_incremental(
+                self.notebook_dir,
+                self.view._rows,
+                entry_id,
+                self.view,
+            )
+            self.view._index.rebuild(self.view, self.view._rows)
+            self.view.SetVirtualSize((-1, self.view._index.content_height()))
+            self.view._refresh_changed_area(entry_id)
+            return True
+        else:
+            # Normal mode - persist the change (existing code)
+            toggle_collapsed(self.notebook_dir, entry_id)
+
+            self.view.invalidate_subtree_cache(entry_id)
+            self.view._rows = update_tree_incremental(
+                self.notebook_dir,
+                self.view._rows,
+                entry_id,
+                self.view,
+            )
+            self.view._index.rebuild(self.view, self.view._rows)
+            self.view.SetVirtualSize((-1, self.view._index.content_height()))
+            self.view._refresh_changed_area(entry_id)
+            return True
+
+    @check_read_only
     def create_siblings_batch(self, target_id: str, titles: List[str]) -> List[str]:
         """Efficiently create multiple siblings (for PDF import)."""
         new_ids = []
@@ -212,21 +281,43 @@ class FlatTree:
             return False
 
         expanded_any = False
+
         for ancestor_id in ancestors:
             try:
-                ancestor_entry = self.view._get(ancestor_id)
-                is_collapsed = ancestor_entry.get("collapsed", False)
+                # Check current collapsed state (respecting transient state)
+                is_collapsed = False
+
+                if self.view.is_read_only():
+                    # In read-only mode, check transient state
+                    is_collapsed = self._transient_collapsed.get(ancestor_id, False)
+                    if not is_collapsed:
+                        # Check persistent state as fallback
+                        ancestor_entry = self.view._get(ancestor_id)
+                        is_collapsed = ancestor_entry.get("collapsed", False)
+                else:
+                    # Normal mode, check persistent state
+                    ancestor_entry = self.view._get(ancestor_id)
+                    is_collapsed = ancestor_entry.get("collapsed", False)
+
+                # Expand if collapsed
                 if is_collapsed:
-                    # Expand this ancestor
-                    toggle_collapsed(self.notebook_dir, ancestor_id)
-                    self.view.invalidate_cache(ancestor_id)
+                    if self.view.is_read_only():
+                        # Expand transiently in read-only mode
+                        self._transient_collapsed[ancestor_id] = False
+                    else:
+                        # Expand persistently in normal mode
+                        from core.tree_utils import set_collapsed
+                        set_collapsed(self.notebook_dir, ancestor_id, False)
+                        self.view.invalidate_cache(ancestor_id)
+
                     expanded_any = True
+
             except Exception:
                 # Skip ancestors that don't exist or can't be loaded
                 continue
 
         return expanded_any
-    
+
     def ensure_entry_visible(self, entry_id: str) -> bool:
         """
         Expand ancestors and navigate to entry. Returns True if successful.
@@ -278,6 +369,7 @@ class FlatTree:
             
         return descendants
     
+    @check_read_only
     def _update_after_insertion(self, insert_idx: int, new_row: Row):
         """Update layout and UI after row insertion."""
         self.view._index.insert_row(self.view, insert_idx, new_row)

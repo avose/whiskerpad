@@ -21,9 +21,9 @@ class LogList(wx.VListBox):
     def __init__(self, parent, log, size):
         self.log = log
         style = wx.LB_MULTIPLE | wx.LB_EXTENDED | wx.SIMPLE_BORDER
-        self.char_w,self.char_h = 10,10
+        self.char_w,self.char_h = 9,9
         super(LogList, self).__init__(parent, style=style, size=size)
-        self.fontinfo = wx.FontInfo(10).FaceName("Monospace")
+        self.fontinfo = wx.FontInfo(9).FaceName("Monospace")
         self.font = wx.Font(self.fontinfo)
         dc = wx.MemoryDC()
         dc.SetFont(self.font)
@@ -31,6 +31,7 @@ class LogList(wx.VListBox):
         self.char_w,self.char_h = dc.GetTextExtent("X")
         self.SetItemCount(self.log.count())
         self.ScrollRows(self.log.count())
+        self.Bind(wx.EVT_LEFT_UP, self._on_item_clicked)
         self.Show(True)
         return
 
@@ -104,6 +105,27 @@ class LogList(wx.VListBox):
 
     def OnDrawSeparator(self, dc, rect, index):
         return
+
+    def _on_item_clicked(self, event):
+        """Copy the clicked log entry's text to clipboard."""
+        # Let the normal selection handling happen first
+        event.Skip()
+
+        # Get the item that was clicked
+        pos = event.GetPosition()
+        item_index = self.VirtualHitTest(pos.y)
+
+        if item_index != wx.NOT_FOUND and item_index < self.log.count():
+            # Get the log entry - this returns (timestamp, text)
+            timestamp, text = self.log.get(item_index)
+
+            # Copy just the text portion (not timestamp or index) to clipboard
+            if text:
+                data_obj = wx.TextDataObject(text)
+                wx.TheClipboard.Open()  # Let it fail if clipboard can't open
+                wx.TheClipboard.SetData(data_obj)
+                wx.TheClipboard.Close()
+
 
 ################################################################################################
 class StatusBarPopup(wx.PopupTransientWindow):

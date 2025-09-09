@@ -49,6 +49,19 @@ class RowPainter:
         self.m = metrics
         self.cursor_renderer = CursorRenderer()
 
+    def _get_collapsed_state(self, entry_id: str) -> bool:
+        """Get collapse state, respecting read-only transient state"""
+        # Check transient state in read-only mode
+        if self.view.is_read_only():
+            return self.view.flat_tree._transient_collapsed.get(entry_id, False)
+
+        # Normal persistent state
+        try:
+            entry = self.view._get(entry_id)
+            return entry.get("collapsed", False)
+        except:
+            return False
+
     # ------------------------------------------------------------------ #
 
     def draw(
@@ -128,7 +141,7 @@ class RowPainter:
         y_text_top = rect.y + self.m.PADDING
 
         has_kids = any(it.get("type") == "child" for it in entry.get("items", []))
-        collapsed = bool(entry.get("collapsed", False))
+        collapsed = self._get_collapsed_state(row.entry_id)
         caret_glyph = "▶" if (has_kids and collapsed) else ("▼" if has_kids else "•")
 
         gc.SetFont(self.view._bold if has_kids else self.view._font,

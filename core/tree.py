@@ -1,10 +1,21 @@
 from __future__ import annotations
 
-import json, os, uuid, time
+import wx
+import json
+import os
+import uuid
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from core.log import Log
+
+def _check_read_only():
+    """Final safety check against writes in read-only mode"""
+    app = wx.GetApp()
+    main_frame = app.GetTopWindow()
+    if main_frame.is_read_only():
+        raise RuntimeError("Write operation blocked in read-only mode.")
 
 def _read_json(p: Path, default: Any) -> Any:
     try:
@@ -15,6 +26,7 @@ def _read_json(p: Path, default: Any) -> Any:
         raise ValueError(f"Malformed JSON in {p}: {e}") from e
 
 def _atomic_write_json(p: Path, obj: Dict[str, Any]) -> None:
+    _check_read_only()
     tmp = p.with_suffix(p.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
@@ -49,6 +61,7 @@ def load_notebook(notebook_dir: str) -> Dict[str, Any]:
     return metadata
 
 def save_notebook(notebook_dir: str, metadata: Dict[str, Any]) -> None:
+    _check_read_only()
     paths = notebook_paths(notebook_dir)
     _atomic_write_json(paths["notebook_json"], metadata)
 
@@ -56,6 +69,7 @@ def get_root_ids(notebook_dir: str) -> List[str]:
     return list(load_notebook(notebook_dir).get("root_ids", []))
 
 def set_root_ids(notebook_dir: str, ids: List[str]) -> None:
+    _check_read_only()
     metadata = load_notebook(notebook_dir)
     metadata["root_ids"] = list(ids)
     save_notebook(notebook_dir, metadata)
@@ -85,6 +99,7 @@ def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str =
 
     Returns new entry_id.
     """
+    _check_read_only()
     eid = _new_id()
     Log.debug(f"create_entry({parent_id=}), {eid=}", 10)
     d = entry_dir(notebook_dir, eid)
@@ -136,6 +151,7 @@ def load_entry(notebook_dir: str, entry_id: str) -> Dict[str, Any]:
     return _read_json(paths, {})
 
 def save_entry(notebook_dir: str, entry: Dict[str, Any]) -> None:
+    _check_read_only()
     Log.debug(f"save_entry({entry['id']=})", 10)
     entry["updated_ts"] = int(time.time())
     paths = entry_json_path(notebook_dir, entry["id"])
@@ -151,6 +167,7 @@ def get_entry_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str, Any]
 
 def set_entry_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Set the rich text content of an entry."""
+    _check_read_only()
     Log.debug(f"set_entry_rich_text({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
@@ -175,6 +192,7 @@ def get_entry_edit_rich_text(notebook_dir: str, entry_id: str) -> List[Dict[str,
 
 def set_entry_edit_rich_text(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Set the temporary edit rich text of an entry (auto-saved during editing)."""
+    _check_read_only()
     Log.debug(f"set_entry_edit_rich_text({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["edit"] = rich_text
@@ -183,6 +201,7 @@ def set_entry_edit_rich_text(notebook_dir: str, entry_id: str, rich_text: List[D
 
 def commit_entry_edit(notebook_dir: str, entry_id: str, rich_text: List[Dict[str, Any]]) -> None:
     """Commit edit rich text to final text and clear edit field."""
+    _check_read_only()
     Log.debug(f"commit_entry_edit({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["text"] = rich_text
@@ -192,6 +211,7 @@ def commit_entry_edit(notebook_dir: str, entry_id: str, rich_text: List[Dict[str
 
 def cancel_entry_edit(notebook_dir: str, entry_id: str) -> None:
     """Cancel editing by clearing the edit field."""
+    _check_read_only()
     Log.debug(f"cancel_entry_edit({entry_id=})", 10)
     entry = load_entry(notebook_dir, entry_id)
     entry["edit"] = []  # Clear edit field (now empty rich text array)

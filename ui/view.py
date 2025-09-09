@@ -7,6 +7,8 @@ import os
 import tempfile
 from typing import Dict, Any, List, Optional
 
+from ui.decorators import check_read_only
+
 # -----------------------------------------------------------------------------
 # project imports
 # -----------------------------------------------------------------------------
@@ -68,6 +70,7 @@ class GCView(wx.ScrolledWindow):
 
         # central cache
         self.cache = NotebookCache(notebook_dir)
+        self._read_only = False
 
         # flattened rows + selection
         self._rows: List[Row] = []
@@ -164,6 +167,18 @@ class GCView(wx.ScrolledWindow):
         from ui.image_loader import clear_thumb_cache
         clear_thumb_cache()
 
+    def is_read_only(self) -> bool:
+        """Check if in read-only mode"""
+        if getattr(self, '_read_only', False):
+            return True
+        try:
+            main_frame = wx.GetApp().GetTopWindow()
+            if hasattr(main_frame, 'is_read_only'):
+                return main_frame.is_read_only()
+        except:
+            pass
+        return False
+
     # ------------------------------------------------------------------ #
     # thin helper: keep legacy _get(...) usage alive
     # ------------------------------------------------------------------ #
@@ -205,7 +220,7 @@ class GCView(wx.ScrolledWindow):
         prev_id = self.current_entry_id()
 
         self.cache.invalidate_all()
-        self._rows = flatten_tree(self.notebook_dir, self.root_id)
+        self._rows = flatten_tree(self.notebook_dir, self.root_id, self)
         self._index.rebuild(self, self._rows)
 
         total_h = self._index.content_height() if self._rows else 0
@@ -256,6 +271,7 @@ class GCView(wx.ScrolledWindow):
 
     # ------------ Edit mode management ------------
 
+    @check_read_only
     def enter_edit_mode(self, row_idx: int, cursor_pos: int = 0):
         # First, properly exit any active edit mode using the dedicated function
         self.exit_edit_mode(save=True)
@@ -276,6 +292,7 @@ class GCView(wx.ScrolledWindow):
         self.invalidate_cache(row.entry_id)
         self._refresh_edit_row()
 
+    @check_read_only
     def exit_edit_mode(self, save: bool = True):
         if not self._edit_state.active:
             return
@@ -411,6 +428,7 @@ class GCView(wx.ScrolledWindow):
     # keystroke-driven text edit helpers (unchanged except cache calls)
     # ==========================================================================
 
+    @check_read_only
     def insert_text_at_cursor(self, text: str):
         if not self._edit_state.active:
             return
@@ -442,6 +460,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self._refresh_edit_row()
 
+    @check_read_only
     def delete_char_before_cursor(self):
         if not self._edit_state.active:
             return
@@ -469,6 +488,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self._refresh_edit_row()
 
+    @check_read_only
     def delete_char_after_cursor(self):
         if not self._edit_state.active:
             return
@@ -495,6 +515,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self._refresh_edit_row()
 
+    @check_read_only
     def delete_selected_text(self):
         """Delete the currently selected text."""
         if not self._edit_state.active or not self._edit_state.has_selection():
@@ -528,12 +549,14 @@ class GCView(wx.ScrolledWindow):
                 # For single-line changes, just refresh the row
                 self._refresh_edit_row()
 
+    @check_read_only
     def move_cursor(self, delta: int):
         if self._edit_state.active:
             self._edit_state.move_cursor(delta)
             self._edit_state.update_format_from_cursor()
             self._refresh_edit_row()
 
+    @check_read_only
     def set_cursor_position(self, pos: int):
         if self._edit_state.active:
             self._edit_state.set_cursor_position(pos)
@@ -656,6 +679,7 @@ class GCView(wx.ScrolledWindow):
 
     # ------------ Clipboard operations ------------
 
+    @check_read_only
     def copy(self):
         """Copy selected text or mark row as bookmark source."""
         try:
@@ -711,6 +735,7 @@ class GCView(wx.ScrolledWindow):
             error_msg = f"Copy failed: {e}"
             self.SetStatusText(error_msg)
 
+    @check_read_only
     def paste(self):
         """Uses FlatTree for sibling creation."""
         # First check for link insertion when in edit mode with bookmark source
@@ -732,6 +757,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self.SetStatusText("Nothing to paste")
 
+    @check_read_only
     def _paste_image(self):
         """Handle pasting image using FlatTree."""
         temp_image_path = Clipboard.get_image()
@@ -791,6 +817,7 @@ class GCView(wx.ScrolledWindow):
         except Exception as e:
             self.SetStatusText(f"Failed to paste image: {e}")
 
+    @check_read_only
     def _paste_text(self):
         """Handle pasting text from clipboard."""
         if not self._edit_state.active:
@@ -806,6 +833,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self.SetStatusText("No text on clipboard")
 
+    @check_read_only
     def _insert_link_from_bookmark_source(self) -> bool:
         """Insert a link to the bookmark source at the cursor position."""
         if not self._bookmark_source_id or not self._edit_state.active:
@@ -872,6 +900,7 @@ class GCView(wx.ScrolledWindow):
             self.SetStatusText(f"Failed to insert link: {e}")
             return False
 
+    @check_read_only
     def cut(self):
         """Cut selected text or mark row for moving."""
         if self._edit_state.active:
@@ -901,6 +930,7 @@ class GCView(wx.ScrolledWindow):
             else:
                 self.SetStatusText("No row selected to cut")
 
+    @check_read_only
     def _move_cut_row(self):
         """Move cut row using FlatTree."""
         if not self._cut_entry_id:
@@ -932,6 +962,7 @@ class GCView(wx.ScrolledWindow):
         else:
             self.SetStatusText("Cannot move row to that location")
 
+    @check_read_only
     def clear_bookmark_source(self):
         """Clear the bookmark source selection."""
         if self._bookmark_source_id:
@@ -942,6 +973,7 @@ class GCView(wx.ScrolledWindow):
 
     # ------------ Image zoom operations ------------
 
+    @check_read_only
     def zoom_image_in(self):
         """Zoom in the selected image thumbnail."""
         from ui.image_transform import get_current_thumbnail_max_size, calculate_zoom_in_size, can_zoom_in
@@ -961,6 +993,7 @@ class GCView(wx.ScrolledWindow):
         new_max_size = calculate_zoom_in_size(current_max)
         self._regenerate_thumbnail(row_idx, new_max_size)
 
+    @check_read_only
     def zoom_image_out(self):
         """Zoom out the selected image thumbnail."""
         from ui.image_transform import get_current_thumbnail_max_size, calculate_zoom_out_size, can_zoom_out
@@ -980,6 +1013,7 @@ class GCView(wx.ScrolledWindow):
         new_max_size = calculate_zoom_out_size(current_max)
         self._regenerate_thumbnail(row_idx, new_max_size)
 
+    @check_read_only
     def zoom_image_reset(self):
         """Reset image thumbnail to natural size (original size or 256px, whichever is smaller)."""
         from ui.image_transform import calculate_reset_size
@@ -1000,26 +1034,31 @@ class GCView(wx.ScrolledWindow):
 
     # ------------ Image transform operations ------------
 
+    @check_read_only
     def rotate_image_clockwise(self):
         """Rotate the selected image thumbnail 90 degrees clockwise."""
         from ui.image_transform import rotate_thumbnail_clockwise
         self._apply_thumbnail_transform(rotate_thumbnail_clockwise)
 
+    @check_read_only
     def rotate_image_anticlockwise(self):
         """Rotate the selected image thumbnail 90 degrees anticlockwise."""
         from ui.image_transform import rotate_thumbnail_anticlockwise
         self._apply_thumbnail_transform(rotate_thumbnail_anticlockwise)
 
+    @check_read_only
     def flip_image_vertical(self):
         """Flip the selected image thumbnail vertically."""
         from ui.image_transform import flip_thumbnail_vertical
         self._apply_thumbnail_transform(flip_thumbnail_vertical)
 
+    @check_read_only
     def flip_image_horizontal(self):
         """Flip the selected image thumbnail horizontally."""
         from ui.image_transform import flip_thumbnail_horizontal
         self._apply_thumbnail_transform(flip_thumbnail_horizontal)
 
+    @check_read_only
     def _apply_thumbnail_transform(self, transform_func):
         """Apply a transformation function to the selected image thumbnail."""
         from ui.row_utils import get_image_filename
@@ -1063,6 +1102,7 @@ class GCView(wx.ScrolledWindow):
 
         return self._sel
 
+    @check_read_only
     def _regenerate_thumbnail(self, row_idx: int, new_max_size: int):
         """Regenerate thumbnail for image row with new size."""
         from ui.image_utils import make_thumbnail_file

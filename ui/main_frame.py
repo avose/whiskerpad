@@ -16,6 +16,7 @@ from core.tree import (
     load_notebook,
     save_notebook,
 )
+from core.version_manager import VersionManager
 from ui.toolbar import Toolbar
 from ui.statusbar import StatusBar
 from ui.image_import import import_image_into_entry
@@ -24,17 +25,24 @@ from ui.icons import wpIcons
 from ui.tabs_panel import TabsPanel, TabInfo
 from ui.pdf_import import show_pdf_import_dialog, is_pdf_import_available
 from ui.search import show_search_dialog
-from ui.help import wpAboutFrame, wpLicenseFrame, wpDonateFrame
+from ui.help import wpAboutFrame, wpDonateFrame
+from ui.licenses import wpLicenseFrame
+from ui.history_browser import HistoryBrowserDialog
 
 
 class MainFrame(wx.Frame):
-    LICENSES_ID = wx.NewIdRef()
-
+    """Main application frame for WhiskerPad application. """
     def __init__(self, verbosity: int = 0):
         super().__init__(None, title="WhiskerPad", size=(900, 700))
         self.SetMinSize((640, 480))
 
         self.io = IOWorker()
+        self.version_manager = VersionManager(self.io)
+        self._history_browser = None
+        self._read_only = False
+        self._auto_commit_timer = wx.Timer(self)
+        self._auto_commit_timer.Start(60000)  # 60 seconds
+        self.Bind(wx.EVT_TIMER, self._on_auto_commit_timer, self._auto_commit_timer)
         self.current_notebook_path: str | None = None
         self._current_entry_id: str | None = None
         self._current_note_panel: NotePanel | None = None
@@ -49,6 +57,7 @@ class MainFrame(wx.Frame):
         self.SetStatusBar(StatusBar(self))
         self.SetStatusText("Ready.")
         self._build_body()
+        self.Bind(wx.EVT_CLOSE, self.Close)
 
     # ---------------- FG / BG coloring ----------------
 
@@ -182,7 +191,25 @@ class MainFrame(wx.Frame):
         # File menu
         m_file = wx.Menu()
         m_new = m_file.Append(wx.ID_NEW, "&New Notebook...\tCtrl-N")
+        self.new_notebook_menu_item = m_new
         m_open = m_file.Append(wx.ID_OPEN, "&Open Notebook...\tCtrl-O")
+        self.open_notebook_menu_item = m_open
+
+        # History
+        m_file.AppendSeparator()
+        mi_history = wx.MenuItem(m_file, wx.ID_ANY, "History &Browser...\tCtrl-B")
+        history_icon = wpIcons.Get("hourglass")
+        if history_icon:
+            mi_history.SetBitmap(history_icon)
+        m_file.Append(mi_history)
+        self.Bind(wx.EVT_MENU, self._on_history_browser, mi_history)
+        mi_checkpoint = wx.MenuItem(m_file, wx.ID_ANY, "&Save Checkpoint...\tCtrl-S")
+        checkpoint_icon = wpIcons.Get("disk")
+        if checkpoint_icon:
+            mi_checkpoint.SetBitmap(checkpoint_icon)
+        m_file.Append(mi_checkpoint)
+        self.Bind(wx.EVT_MENU, self._on_create_checkpoint, mi_checkpoint)
+        self.checkpoint_menu_item = mi_checkpoint
 
         # Add separator and PDF import
         m_file.AppendSeparator()
@@ -190,24 +217,24 @@ class MainFrame(wx.Frame):
         # Only add PDF import menu if PyMuPDF is available
         if is_pdf_import_available():
             # Create MenuItem object explicitly instead of using Append()
-            m_import_pdf = wx.MenuItem(m_file, wx.ID_ANY, "Import &PDF...\tCtrl-Shift-P")
-
+            m_import_pdf = wx.MenuItem(m_file, wx.ID_ANY, "Import &PDF")
             # Set the bitmap BEFORE appending to menu
             pdf_icon = wpIcons.Get("page_white_acrobat")
             if pdf_icon:
                 m_import_pdf.SetBitmap(pdf_icon)
-
             # Now append the MenuItem object to the menu
             m_file.Append(m_import_pdf)
-
             # Bind the event handler
             self.Bind(wx.EVT_MENU, self.on_import_pdf, m_import_pdf)
+            self.import_pdf_menu_item = m_import_pdf
+        else:
+            self.import_pdf_menu_item = None
 
         m_file.AppendSeparator()
         m_quit = m_file.Append(wx.ID_EXIT, "E&xit")
         self.Bind(wx.EVT_MENU, self.on_new_notebook, m_new)
         self.Bind(wx.EVT_MENU, self.on_open_notebook, m_open)
-        self.Bind(wx.EVT_MENU, lambda evt: self.Close(), m_quit)
+        self.Bind(wx.EVT_MENU, self.on_quit, m_quit)
         mb.Append(m_file, "&File")
 
         # Help menu
@@ -346,6 +373,18 @@ class MainFrame(wx.Frame):
             return
 
         self.current_notebook_path = result["path"]
+
+        # Initialize Git repository for this notebook
+        try:
+            self.version_manager.ensure_repository(self.current_notebook_path)
+        except Exception as e:
+            wx.MessageBox(
+                f"Failed to initialize version control:\n\n{str(e)}\n\n"
+                f"The notebook will work normally but history features won't be available.", 
+                "Version Control Warning", 
+                wx.OK | wx.ICON_WARNING
+            )
+
         label = f"Notebook: {result['name']}\nPath: {self.current_notebook_path}"
 
         if self.info is not None:
@@ -411,21 +450,14 @@ class MainFrame(wx.Frame):
 
     # ---------------- Tabs ----------------
 
-    def _on_tab_selected(self, entry_id: str, notebook_path: str):
+    def _on_tab_selected(self, entry_id: str):  # Remove notebook_path parameter
         """Handle tab selection - ensure ancestors are expanded, then navigate."""
         if not self._current_note_panel:
             self.SetStatusText("No notebook open")
             return
 
-        if self.current_notebook_path != notebook_path:
-            self.SetStatusText("Tab is from a different notebook")
-            return
-
         view = self._current_note_panel.view
-
-        # Use the robust navigation function
         success = view.navigate_to_entry(entry_id)
-
         if success:
             self.SetStatusText("Navigated to bookmarked entry")
             Log.debug(f"Tab jump to {entry_id=}.", 1)
@@ -433,7 +465,6 @@ class MainFrame(wx.Frame):
             self.SetStatusText("Could not find bookmarked entry (may have been deleted)")
             Log.debug(f"Tab target DNE: {entry_id=}.", 0)
 
-        # Restore focus to the view
         self._restore_view_focus()
 
     def _on_add_tab(self, evt=None):
@@ -443,18 +474,16 @@ class MainFrame(wx.Frame):
             return
 
         view = self._current_note_panel.view
-
         if not (0 <= view._sel < len(view._rows)):
             self.SetStatusText("No row selected - select a row to create a tab")
             return
 
         selected_row = view._rows[view._sel]
         entry_id = selected_row.entry_id
-        Log.debug(f"_on_add_tab(), {selected_row=}", 1)
-        
+
         try:
-            # Create TabInfo object with default color
-            tab_info = TabInfo(entry_id, "New Tab", self.current_notebook_path)
+            # Create TabInfo without notebook_path
+            tab_info = TabInfo(entry_id, "New Tab")
             self.tabs_panel.tabs.append(tab_info)
 
             # Open rename dialog immediately
@@ -465,11 +494,8 @@ class MainFrame(wx.Frame):
                 self.tabs_panel.tabs[new_tab_idx].display_text = new_name
                 self.tabs_panel.Refresh()
                 self.SetStatusText(f"Created tab: {new_name}")
-
-                # Save the new tab
                 self._save_tabs_to_notebook()
             else:
-                # User cancelled, remove the tab
                 self.tabs_panel.tabs.pop()
                 self.tabs_panel.Refresh()
                 self.SetStatusText("Tab creation cancelled")
@@ -478,61 +504,33 @@ class MainFrame(wx.Frame):
                 view.clear_bookmark_source()
 
         except Exception as e:
-            error_msg = f"Failed to create tab: {e}"
-            self.SetStatusText(error_msg)
+            self.SetStatusText(f"Failed to create tab: {e}")
 
         self._restore_view_focus()
 
     def _save_tabs_to_notebook(self):
-        """Save current tabs to notebook metadata with colors."""
-        if not self.current_notebook_path or not self.tabs_panel:
-            return
+        """Save current tabs to notebook metadata (new format only)."""
         Log.debug(f"_save_tabs_to_notebook()", 1)
-
-        # Load current notebook metadata
         metadata = load_notebook(self.current_notebook_path)
 
-        # Convert tabs to saveable format with colors
+        # Save tabs
         tabs_data = []
         for tab in self.tabs_panel.tabs:
             tabs_data.append(tab.to_dict())
 
-        # Save to metadata
         metadata["tabs"] = tabs_data
         save_notebook(self.current_notebook_path, metadata)
 
     def _load_tabs_from_notebook(self):
-        """Load tabs from notebook metadata with colors."""
-        if not self.current_notebook_path or not self.tabs_panel:
-            return
+        """Load tabs from notebook metadata (new format only)."""
         Log.debug(f"_load_tabs_from_notebook()", 1)
-
-        # Load notebook metadata
         metadata = load_notebook(self.current_notebook_path)
         tabs_data = metadata.get("tabs", [])
 
-        # Clear existing tabs and load saved ones
         self.tabs_panel.clear_tabs()
-
         for tab_data in tabs_data:
-            # Handle both old format (without color) and new format (with color)
-            if isinstance(tab_data, dict) and "color" in tab_data:
-                # New format with color
-                tab_info = TabInfo.from_dict(tab_data)
-                self.tabs_panel.tabs.append(tab_info)
-            else:
-                # Old format or simple data - create with default color
-                if isinstance(tab_data, dict):
-                    entry_id = tab_data["entry_id"]
-                    display_text = tab_data["display_text"] 
-                    notebook_path = tab_data["notebook_path"]
-                else:
-                    # Very old format, skip
-                    continue
-
-                tab_info = TabInfo(entry_id, display_text, notebook_path)
-                self.tabs_panel.tabs.append(tab_info)
-
+            tab_info = TabInfo.from_dict(tab_data)
+            self.tabs_panel.tabs.append(tab_info)
         self.tabs_panel.Refresh()
 
     # ---------------- Embed NotePanel ----------------
@@ -696,14 +694,166 @@ class MainFrame(wx.Frame):
         else:
             self.donate_frame.Raise()
 
+    # --------------- History Browser ---------------
+
+    def _on_history_browser(self, event=None):
+        """Open the history browser dialog for the current notebook."""
+        if not self.current_notebook_path:
+            wx.MessageBox(
+                "Open a notebook first to view history.", 
+                "No Notebook Open", 
+                wx.OK | wx.ICON_INFORMATION
+            )
+            return
+
+        # Prevent multiple history browsers
+        if self._history_browser:
+            self._history_browser.Raise()
+            return
+
+        try:
+            # Create and show non-modal dialog
+            self._history_browser = HistoryBrowserDialog(
+                self,
+                self.current_notebook_path,
+                self.version_manager
+            )
+            self._history_browser.Show()
+
+            # Clean up reference when dialog closes
+            def on_dialog_close(evt):
+                self._history_browser = None
+                evt.Skip()
+
+            self._history_browser.Bind(wx.EVT_CLOSE, on_dialog_close)
+
+        except Exception as e:
+            wx.MessageBox(
+                f"Failed to open history browser:\n\n{str(e)}", 
+                "Version Control Error", 
+                wx.OK | wx.ICON_ERROR
+            )
+
+        self._restore_view_focus()
+
+    def set_read_only_mode(self, read_only: bool):
+        """Switch between read-only and editable mode."""
+        self._read_only = read_only
+
+        if read_only:
+            self.SetStatusText("Read-only mode: Viewing historical version.")
+            # Disable editing controls
+            if self._toolbar:
+                self._toolbar.Enable(False)
+            # Disable specific menu items
+            self.checkpoint_menu_item.Enable(False)
+            self.import_pdf_menu_item.Enable(False)
+            self.new_notebook_menu_item.Enable(False)
+            self.open_notebook_menu_item.Enable(False)
+        else:
+            self.SetStatusText("Ready")
+            # Re-enable editing controls  
+            if self._toolbar:
+                self._toolbar.Enable(True)
+            self.checkpoint_menu_item.Enable(True)
+            self.import_pdf_menu_item.Enable(True)
+            self.new_notebook_menu_item.Enable(True)
+            self.open_notebook_menu_item.Enable(True)
+
+        # Propagate to current view
+        if self._current_note_panel and self._current_note_panel.view:
+            self._current_note_panel.view._read_only = read_only
+            if read_only:
+                self._current_note_panel.view.flat_tree.enter_read_only_mode()
+            else:
+                self._current_note_panel.view.flat_tree.exit_read_only_mode()
+
+    def is_read_only(self) -> bool:
+        """Check if currently in read-only mode"""
+        return self._read_only
+
+    def reload_notebook(self):
+        """Reload the current notebook (for after Git checkout operations)."""
+        if not self.current_notebook_path or not self._current_note_panel:
+            return
+
+        # Force complete reload of the current view
+        if self._current_note_panel:
+            self._current_note_panel.reload()
+            self._restore_view_focus()
+        self._load_tabs_from_notebook()
+
+    def _on_auto_commit_timer(self, event):
+        """Periodically check if auto-commit is needed."""
+        if self.current_notebook_path:
+            try:
+                self.version_manager.auto_commit_if_needed(self.current_notebook_path)
+            except Exception:
+                # Silently ignore auto-commit errors so they don't disrupt workflow
+                pass
+
+    def _on_create_checkpoint(self, event=None):
+        """Create a manual checkpoint with user-provided message."""
+        if not self.current_notebook_path:
+            wx.MessageBox(
+                "Open a notebook first to create a checkpoint.", 
+                "No Notebook Open", 
+                wx.OK | wx.ICON_INFORMATION
+            )
+            return
+
+        # Get checkpoint message from user
+        with wx.TextEntryDialog(
+            self, 
+            "Enter a description for this checkpoint:",
+            "Create Checkpoint",
+            "Manual checkpoint"
+        ) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                self.SetStatusText("Checkpoint cancelled")
+                return
+
+            message = dlg.GetValue().strip()
+            if not message:
+                message = "Manual checkpoint"
+
+        # Show progress
+        self.SetStatusText("Creating checkpoint...")
+
+        try:
+            self.version_manager.create_manual_checkpoint(self.current_notebook_path, message)
+            self.SetStatusText(f"Checkpoint created: {message}")
+
+        except ValueError as e:
+            # Handle "no changes" case gracefully
+            if "No changes to commit" in str(e):
+                wx.MessageBox(
+                    "No changes to save.\n\nAll your work is already saved.", 
+                    "No Changes", 
+                    wx.OK | wx.ICON_INFORMATION
+                )
+                self.SetStatusText("No changes to save")
+            else:
+                wx.MessageBox(str(e), "Checkpoint Error", wx.OK | wx.ICON_ERROR)
+                self.SetStatusText(f"Checkpoint error: {e}")
+
+        except Exception as e:
+            error_msg = f"Failed to create checkpoint: {str(e)}"
+            self.SetStatusText(error_msg)
+            wx.MessageBox(error_msg, "Checkpoint Error", wx.OK | wx.ICON_ERROR)
+
+        self._restore_view_focus()
+
     # --------------- Close ---------------
 
-    def Close(self, force=False):
+    def on_quit(self, event):
+        evt = wx.CloseEvent(wx.wxEVT_CLOSE_WINDOW)
+        wx.PostEvent(self, evt)
+
+    def Close(self, event):
         """Clean up before closing the application."""
-        # Save tabs before closing
-        self._save_tabs_to_notebook()
-
-        if self._current_note_panel and hasattr(self._current_note_panel, 'view'):
-            self._current_note_panel.view.cleanup()
-
-        return super().Close(force)
+        # Close history browser if it's open
+        if self._history_browser:
+            self._history_browser.Close()
+            self._history_browser = None
+        event.Skip()

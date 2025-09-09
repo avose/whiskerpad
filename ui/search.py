@@ -195,27 +195,28 @@ class SearchDialog(wx.Dialog):
         
         # Search input section
         search_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        search_sizer.Add(wx.StaticText(self, label="Search:"), 0, 
-                        wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        search_sizer.Add(
+            wx.StaticText(self, label="Search:"), 0, 
+            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
         search_sizer.Add(self.search_ctrl, 1, wx.EXPAND)
-        
-        main_sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 10)
+        main_sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 4)
         
         # Progress and status
-        main_sizer.Add(self.progress, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
-        main_sizer.Add(self.status_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        main_sizer.Add(self.progress, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
+        main_sizer.Add(self.status_label, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 4)
         
         # Results list
-        main_sizer.Add(self.results_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        main_sizer.Add(self.results_list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
         
         # Button row
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        button_sizer.Add(self.search_button, 0, wx.RIGHT, 5)
-        button_sizer.Add(self.cancel_button, 0, wx.RIGHT, 5)
+        button_sizer.Add(self.search_button, 0, wx.RIGHT, 2)
+        button_sizer.Add(self.cancel_button, 0, wx.RIGHT, 2)
         button_sizer.AddStretchSpacer()
         button_sizer.Add(self.close_button, 0)
         
-        main_sizer.Add(button_sizer, 0, wx.EXPAND | wx.ALL, 10)
+        main_sizer.Add(button_sizer, 0, wx.EXPAND | wx.ALL, 4)
         
         self.SetSizer(main_sizer)
     
