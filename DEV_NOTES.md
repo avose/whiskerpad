@@ -195,27 +195,18 @@ Optional:
 
 OUTSTANDING ISSUES / TODO
 --------------------------
-1. Undo/redo system implementation
-2. Multi-line text editing issues:
-   - Mouse coordinate to character position conversion
-   - Double-click word selection on multi-line text
-   - Text selection behavior across line boundaries
-   - Cursor positioning after operations like paste
-3. Complete dark mode/light mode theming
-4. User preferences and configuration UI
+1. Expand/contract all bullets functionality
+2. Lines to rows conversion button
+3. Undo/redo system implementation
+4. Context menu for main row view (toolbar alternative)
 5. Performance optimizations for very large notebooks
-6. Context menu for main row view (toolbar alternative)
-7. New features:
-   - Lines to rows conversion button
-   - Expand/contract all bullets functionality
+6. User preferences and configuration UI
 
 DEBUGGING NOTES
 ----------------
 - All error handling now uses explicit exceptions rather than defensive programming
 - Log messages include source filenames automatically
 - Click any log entry to copy the message to clipboard for easy bug reporting
-- History browser properly handles Git state restoration
-- Tab persistence works reliably without silent failures
 
 This document reflects the current state of WhiskerPad development as of September 9, 2025.
 

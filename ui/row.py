@@ -11,7 +11,7 @@ from core.tree import entry_dir
 from ui.types import Row
 from ui.image_loader import load_thumb_bitmap
 from ui.notebook_text import rich_text_from_entry
-from ui.cursor import pixel_pos_from_char, CursorRenderer
+from ui.cursor import CursorRenderer
 from ui.icons import wpIcons
 
 # Import functions that were moved to row_utils
@@ -201,41 +201,23 @@ class RowPainter:
     # ------------------------------------------------------------------ #
 
     def _draw_rich_text(self, gc, row, layout, x, y, selected):
-        """Draw rich text with proper selection highlighting."""
+        """Draw rich text with simple selection highlighting."""
         lines = layout.get("rich_lines") or []
         if not lines:
             self._draw_plain_text_fallback(gc, row, x, y, selected)
             return
 
-        # Get selection range for this row if editing
-        selection_range = self._get_selection_range_for_row(row)
-
-        # Get actual row rectangle for proper selection alignment
-        row_idx = self._row_index(row)
-        row_rect = None
-        if row_idx >= 0:
-            row_top = int(self.view._index.row_top(row_idx))
-            row_height = int(self.view._index.row_height(row_idx))
-            row_rect = wx.Rect(0, row_top, self.view.GetClientSize().width, row_height)
-            # Convert to window coordinates
-            scroll_x, scroll_y = self.view.GetViewStart()
-            scroll_y_px = scroll_y * self.view.GetScrollPixelsPerUnit()[1]
-            row_rect.y -= scroll_y_px
-
-        # Draw each line with line-specific selection
-        char_pos = 0
+        # Draw text normally (no complex per-line selection logic needed)
         cur_y = y
-        total_lines = len(lines)
-
         for line_idx, line in enumerate(lines):
-            is_first_line = (line_idx == 0)
-            is_last_line = (line_idx == total_lines - 1)
-
-            char_pos = self._draw_rich_text_line(
-                gc, line, x, cur_y, char_pos, selection_range,
-                row_rect, is_first_line, is_last_line
-            )
+            self._draw_rich_text_line(gc, line, x, cur_y)
             cur_y += line["height"]
+
+        # Draw selection highlight after drawing text
+        selection_range = self._get_selection_range_for_row(row)
+        if selection_range:
+            start_pos, end_pos = selection_range
+            self._draw_selection_highlight(gc, row, start_pos, end_pos, x, y)
 
     def _draw_plain_text_fallback(self, gc, row, x, y, selected):
         """Draw plain text when no rich text layout is available."""
@@ -254,44 +236,9 @@ class RowPainter:
             return edit_state.get_selection_range()
         return None
 
-    def _draw_link_icon(self, gc, x, y, seg):
-        """Draw a small link icon before link text. Returns icon width."""
-        try:
-            # Load the link icon
-            icon = wpIcons.Get("link")
-
-            if not icon or not icon.IsOk():
-                return 0  # No icon available, no extra width needed
-
-            # Your icons are already 16x16, so use them as-is
-            icon_size = 16
-
-            # Position icon vertically centered with text
-            font_size = self.view._font.GetPointSize()
-            icon_y = y + (font_size - icon_size) // 2
-
-            # Draw the icon
-            gc.DrawBitmap(icon, x, icon_y, icon_size, icon_size)
-
-            # Return icon width + small padding
-            return icon_size + 3  # 16px icon + 3px padding
-
-        except Exception:
-            # Fallback if icon loading fails
-            return 0
-
-
-    def _draw_rich_text_line(self, gc, line, x, cur_y, start_char_pos, selection_range,
-                             row_rect, is_first_line, is_last_line):
-        """Draw a single line of rich text and return updated character position."""
-        char_pos = start_char_pos
+    def _draw_rich_text_line(self, gc, line, x, cur_y):
+        """Draw a single line of rich text without selection complexity."""
         cur_x = x
-
-        # Collect selection bounds for this entire line
-        line_selection_bounds = None
-        if selection_range:
-            line_selection_bounds = self._calculate_line_selection_bounds(
-                line, char_pos, x, selection_range)
 
         # Draw all segments
         for seg in line.get("segments", []):
@@ -304,10 +251,8 @@ class RowPainter:
 
             # Create appropriate font (with underlining for links)
             base_font = self.view._bold if seg.get("bold") else self.view._font
-
             if seg.get("link_target"):
-                # Create copy of base font and set underlined
-                font = wx.Font(base_font)  # Copy constructor
+                font = wx.Font(base_font)
                 font.SetUnderlined(True)
             else:
                 font = base_font
@@ -316,106 +261,7 @@ class RowPainter:
             gc.SetFont(font, color)
             gc.DrawText(txt, cur_x, cur_y)
 
-            # Remove the manual underline drawing - font handles it now!
-
             cur_x += seg["width"]
-            char_pos += len(txt)
-
-        # Draw selection outline for this specific line (if any)
-        if line_selection_bounds and row_rect:
-            self._draw_line_selection_outline(
-                gc, line_selection_bounds, cur_y, line["height"],
-                row_rect, is_first_line, is_last_line)
-
-        return char_pos
-
-    def _calculate_line_selection_bounds(self, line, line_char_start, line_x_start, selection_range):
-        """Calculate the pixel bounds of selection within this line."""
-        sel_start, sel_end = selection_range
-
-        char_pos = line_char_start
-        cur_x = line_x_start
-        selection_left = None
-        selection_right = None
-
-        for seg in line.get("segments", []):
-            txt = seg.get("text", "")
-            if not txt:
-                continue
-
-            text_len = len(txt)
-            text_start = char_pos
-            text_end = text_start + text_len
-
-            # Check if this segment overlaps with selection
-            if sel_start < text_end and sel_end > text_start:
-                # This segment has selection
-                highlight_start = max(0, sel_start - text_start)
-                highlight_end = min(text_len, sel_end - text_start)
-
-                if highlight_start < highlight_end:
-                    # Measure text to get precise bounds
-                    font = self.view._bold if seg.get("bold") else self.view._font
-                    dc = wx.ClientDC(self.view)
-                    dc.SetFont(font)
-
-                    before_text = txt[:highlight_start] if highlight_start > 0 else ""
-                    selected_text = txt[highlight_start:highlight_end]
-
-                    before_width = dc.GetTextExtent(before_text)[0] if before_text else 0
-                    selected_width = dc.GetTextExtent(selected_text)[0]
-
-                    seg_selection_left = cur_x + before_width
-                    seg_selection_right = seg_selection_left + selected_width
-
-                    if selection_left is None:
-                        selection_left = seg_selection_left
-                    else:
-                        selection_left = min(selection_left, seg_selection_left)
-
-                    if selection_right is None:
-                        selection_right = seg_selection_right
-                    else:
-                        selection_right = max(selection_right, seg_selection_right)
-
-            cur_x += seg["width"]
-            char_pos += text_len
-
-        if selection_left is not None and selection_right is not None:
-            return (selection_left, selection_right)
-        return None
-
-    def _draw_line_selection_outline(self, gc, selection_bounds, line_y, line_height,
-                                    row_rect, is_first_line, is_last_line):
-        """Draw selection outline for a specific line with proper vertical bounds."""
-        selection_left, selection_right = selection_bounds
-        selection_width = selection_right - selection_left
-
-        if selection_width <= 0:
-            return
-
-        # Calculate selection rectangle Y position and height based on line position
-        if is_first_line and is_last_line:
-            # Single line - use full row bounds to align with blue outline
-            selection_y = row_rect.y
-            selection_height = row_rect.height
-        elif is_first_line:
-            # First line of multi-line - start from row top, end at line bottom
-            selection_y = row_rect.y
-            selection_height = (line_y - row_rect.y) + line_height
-        elif is_last_line:
-            # Last line of multi-line - start from line top, end at row bottom
-            selection_y = line_y
-            selection_height = (row_rect.y + row_rect.height) - line_y
-        else:
-            # Middle line - just cover this line
-            selection_y = line_y
-            selection_height = line_height
-
-        # Draw black outline rectangle
-        gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), SELECTION_OUTLINE_WIDTH))
-        gc.SetBrush(wx.Brush(wx.Colour(0, 0, 0, 0)))  # Transparent fill
-        gc.DrawRectangle(selection_left, selection_y, selection_width, selection_height)
 
     def _draw_segment_background(self, gc, seg, x, y, height):
         """Draw background color for a text segment if specified."""
@@ -449,6 +295,56 @@ class RowPainter:
 
         return wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
 
+    def _draw_selection_highlight(self, gc, row, selection_start, selection_end, x_text, y_text):
+        """Draw selection highlight as black outline only (no fill)."""
+        if selection_start == selection_end:
+            return
+
+        # Normalize selection range
+        start_pos = min(selection_start, selection_end)
+        end_pos = max(selection_start, selection_end)
+
+        # Get layout and use actual line height (not ROW_H which includes padding)
+        layout = self.view.cache.layout(row.entry_id) or {}
+        line_height = layout.get('line_h', self.view.ROW_H)
+
+        # Get pixel positions
+        start_x, start_y = self.view.cache.char_to_pixel(row, start_pos, x_text, y_text)
+        end_x, end_y = self.view.cache.char_to_pixel(row, end_pos, x_text, y_text)
+
+        # Set black outline, no fill
+        gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+        gc.SetBrush(wx.Brush(wx.Colour(0, 0, 0, 0)))
+
+        if start_y == end_y:
+            # Single line selection - use line_height, not ROW_H
+            width = end_x - start_x
+            gc.DrawRectangle(start_x, start_y, width, line_height)
+        else:
+            # Multi-line selection
+            rich_lines = layout.get('rich_lines', [])
+
+            for line_idx, line in enumerate(rich_lines):
+                line_start_char = line['start_char']
+                line_end_char = line['end_char']
+
+                # Skip lines outside selection
+                if end_pos <= line_start_char or start_pos >= line_end_char:
+                    continue
+
+                # Calculate this line's portion of the selection
+                line_sel_start = max(start_pos, line_start_char)
+                line_sel_end = min(end_pos, line_end_char)
+
+                # Convert to pixels
+                line_start_x, _ = self.view.cache.char_to_pixel(row, line_sel_start, x_text, y_text)
+                line_end_x, _ = self.view.cache.char_to_pixel(row, line_sel_end, x_text, y_text)
+
+                line_y = y_text + line_idx * line_height
+
+                # Draw rectangle outline using line_height
+                gc.DrawRectangle(line_start_x, line_y, line_end_x - line_start_x, line_height)
+
     def _is_valid_color(self, color_str):
         """Check if color string is valid for wx.Colour."""
         if not color_str or not isinstance(color_str, str):
@@ -470,32 +366,17 @@ class RowPainter:
     ):
         st = self.view._edit_state
         rich_text = st.rich_text
+
         if not rich_text:
             return
 
-        avail_w = (
-            self.view.GetClientSize().width
-            - self.view.DATE_COL_W
-            - self.view.PADDING
-            - int(row.level) * self.view.INDENT_W
-            - self.view.GUTTER_W
-            - 4
-        )
-        line_h = int(layout.get("line_h") or self.view.ROW_H)
+        # Use cache for cursor positioning
+        cx, cy = self.view.cache.char_to_pixel(row, st.cursor_pos, x_text, y_text)
 
-        dc = wx.ClientDC(self.view)
-        cx, cy = pixel_pos_from_char(
-            rich_text,
-            st.cursor_pos,
-            x_text,
-            y_text,
-            avail_w,
-            dc,
-            self.view._font,
-            self.view._bold,
-            line_h,
-        )
-        self.cursor_renderer.draw_cursor(gc, cx, cy, self.view.ROW_H, True)
+        # Use actual line height, not ROW_H which includes padding
+        line_height = layout.get('line_h', self.view.ROW_H)
+
+        self.cursor_renderer.draw_cursor(gc, cx, cy, line_height, True)
 
     # ------------------------------------------------------------------ #
     # date gutter

@@ -69,7 +69,7 @@ class GCView(wx.ScrolledWindow):
         self.root_id = root_id
 
         # central cache
-        self.cache = NotebookCache(notebook_dir)
+        self.cache = NotebookCache(notebook_dir, self)
         self._read_only = False
 
         # flattened rows + selection

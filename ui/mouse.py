@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import wx
-
 from core.log import Log
 from ui.row import caret_hit, item_rect, has_children
 from ui.row_utils import date_gutter_hit, caret_hit, item_rect, has_children
 from ui.scroll import soft_ensure_visible
 from ui.select import select_row
-from ui.cursor import char_pos_from_pixel
 from ui.notebook_text import rich_text_from_entry
 from ui.edit_state import find_word_boundaries
-
 
 # ---------------------------------------------------------------------------
 # row hit-testing helpers
@@ -24,7 +21,7 @@ def row_at_window_y(view, ywin: int) -> int:
         return -1
 
     unit_x, unit_y = view.GetScrollPixelsPerUnit()
-    scroll_xu, scroll_yu = view.GetViewStart() # scroll units
+    scroll_xu, scroll_yu = view.GetViewStart()
     scroll_y_px = scroll_yu * unit_y
 
     idx, _ = view._index.find_row_at_y(scroll_y_px + int(ywin))
@@ -39,9 +36,7 @@ def char_pos_from_click(view, row_idx: int, click_pos: wx.Point) -> int:
         return 0
 
     row = view._rows[row_idx]
-    entry = view._get(row.entry_id)
-    rich_text = rich_text_from_entry(entry)
-
+    
     scroll_x, scroll_y = view.GetViewStart()
     scroll_y_px = scroll_y * view.GetScrollPixelsPerUnit()[1]
 
@@ -61,32 +56,11 @@ def char_pos_from_click(view, row_idx: int, click_pos: wx.Point) -> int:
 
     text_area_y = row_rect.y + view.PADDING
 
-    available_w = (
-        view.GetClientSize().width
-        - view.DATE_COL_W
-        - view.PADDING
-        - level * view.INDENT_W
-        - view.GUTTER_W
-        - 4
-    )
-
-    dc = wx.ClientDC(view)
-
-    return char_pos_from_pixel(
-        rich_text,
-        content_click_x,
-        content_click_y,
-        text_area_x,
-        text_area_y,
-        max(10, available_w),
-        dc,
-        view._font,
-        view._bold,
-        view.ROW_H,
-    )
+    # Use cache for coordinate conversion
+    return view.cache.pixel_to_char(row, content_click_x, content_click_y, text_area_x, text_area_y)
 
 # ---------------------------------------------------------------------------
-# Link helpers  
+# Link helpers
 # ---------------------------------------------------------------------------
 
 def _get_text_run_at_char_pos(view, row_idx: int, char_pos: int):
@@ -113,7 +87,6 @@ def _get_text_run_at_char_pos(view, row_idx: int, char_pos: int):
 def _handle_link_click(view, row_idx: int, char_pos: int) -> bool:
     """Check if click was on a link and handle navigation."""
     text_run = _get_text_run_at_char_pos(view, row_idx, char_pos)
-
     if text_run and text_run.link_target:
         # This is a link click - first exit edit mode if active
         if view._edit_state.active:

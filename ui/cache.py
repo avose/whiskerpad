@@ -1,6 +1,7 @@
 # ui/cache.py
 from __future__ import annotations
 
+import wx
 from pathlib import Path
 from typing import Dict, Any, Set, Tuple
 
@@ -40,10 +41,15 @@ class NotebookCache:
     # construction / statistics
     # ------------------------------------------------------------------ #
 
-    def __init__(self, notebook_dir: str) -> None:
+    def __init__(self, notebook_dir: str, view=None) -> None:
         self.notebook_dir = notebook_dir
+        self.view = view  # Reference to view for cache refresh operations
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._dirty: Set[str] = set()  # unsaved entry_data
+
+    def set_view(self, view):
+        """Set view reference after construction if needed"""
+        self.view = view
 
     # ------------------------------------------------------------------ #
     # entry-level I/O
@@ -66,6 +72,153 @@ class NotebookCache:
     # ------------------------------------------------------------------ #
     # layout-data helpers
     # ------------------------------------------------------------------ #
+
+    def char_to_pixel(self, row: Row, char_pos: int, text_area_x: int, text_area_y: int) -> Tuple[int, int]:
+        """Convert character position to pixel coordinates using cached layout data."""
+        from ui.layout import client_text_width, ensure_wrap_cache
+
+        # Ensure we have valid layout data
+        width = client_text_width(self.view, row.level)
+        if not self.layout_valid(row.entry_id, width):
+            ensure_wrap_cache(self.view, row)
+
+        layout = self.layout(row.entry_id)
+        if not layout or layout.get("is_img"):
+            # Image row or no layout - return start position
+            return (text_area_x, text_area_y)
+
+        rich_lines = layout.get("rich_lines", [])
+        line_height = layout.get("line_h", self.view.ROW_H)
+
+        if not rich_lines or char_pos <= 0:
+            return (text_area_x, text_area_y)
+
+        char_pos = min(char_pos, rich_lines[-1]['end_char'])
+
+        # Find which line contains this character position
+        for line_idx, line in enumerate(rich_lines):
+            start_char = line['start_char']
+            end_char = line['end_char']
+
+            # Normal case: position within line
+            if start_char <= char_pos < end_char:
+                y = text_area_y + line_idx * line_height
+
+                # Find x position within the line
+                chars_into_line = char_pos - start_char
+                x = text_area_x
+                chars_measured = 0
+
+                for segment in line['segments']:
+                    segment_len = len(segment['text'])
+                    if chars_measured + segment_len >= chars_into_line:
+                        # Character is within this segment
+                        chars_in_segment = chars_into_line - chars_measured
+                        if chars_in_segment > 0:
+                            partial_text = segment['text'][:chars_in_segment]
+                            font = self.view._bold if segment.get('bold') else self.view._font
+                            dc = wx.ClientDC(self.view)
+                            dc.SetFont(font)
+                            partial_width = dc.GetTextExtent(partial_text)[0]
+                            x += partial_width
+                        return (x, y)
+
+                    x += segment['width']
+                    chars_measured += segment_len
+
+                return (x, y)
+
+            # Special case: position at end of line (but not the last line)
+            elif char_pos == end_char and line_idx < len(rich_lines) - 1:
+                y = text_area_y + line_idx * line_height
+                x = text_area_x + sum(seg['width'] for seg in line['segments'])
+                return (x, y)
+
+        # Fallback: position at end of last line
+        if rich_lines:
+            last_line = rich_lines[-1]
+            y = text_area_y + (len(rich_lines) - 1) * line_height
+            x = text_area_x + sum(seg['width'] for seg in last_line['segments'])
+            return (x, y)
+
+        return (text_area_x, text_area_y)
+
+    def pixel_to_char(self, row: Row, click_x: int, click_y: int, text_area_x: int, text_area_y: int) -> int:
+        """Convert pixel coordinates to character position using cached layout data."""
+        from ui.layout import client_text_width, ensure_wrap_cache
+        
+        # Ensure we have valid layout data
+        width = client_text_width(self.view, row.level)
+        if not self.layout_valid(row.entry_id, width):
+            ensure_wrap_cache(self.view, row)
+        
+        layout = self.layout(row.entry_id)
+        if not layout or layout.get("is_img"):
+            # Image row or no layout - return 0
+            return 0
+        
+        rich_lines = layout.get("rich_lines", [])
+        line_height = layout.get("line_h", self.view.ROW_H)
+        
+        if not rich_lines:
+            return 0
+        
+        # Determine which line was clicked
+        click_y_in_text = click_y - text_area_y
+        if click_y_in_text < 0:
+            return rich_lines[0]['start_char']
+        
+        line_idx = max(0, int(click_y_in_text // line_height))
+        if line_idx >= len(rich_lines):
+            return rich_lines[-1]['end_char']
+        
+        line = rich_lines[line_idx]
+        click_x_in_line = click_x - text_area_x
+
+        if click_x_in_line <= 0:
+            return line['start_char']
+
+        # Find character position within the clicked line
+        char_pos = line['start_char']
+        x_pos = 0
+
+        for segment in line['segments']:
+            segment_width = segment['width']
+            if x_pos + segment_width >= click_x_in_line:
+                # Click is within this segment
+                pos_in_seg = self._find_char_in_segment(segment, click_x_in_line - x_pos)
+                result_pos = char_pos + pos_in_seg
+
+                # NEW: Clamp to line boundaries to prevent end-of-line issues
+                return min(result_pos, line['end_char'])
+
+            x_pos += segment_width
+            char_pos += len(segment['text'])
+
+        # Click was past end of line - return end of this line, not last line
+        return line['end_char']
+
+    def _find_char_in_segment(self, segment: dict, click_x_in_segment: int) -> int:
+        """Find which character in a segment was clicked."""
+        text = segment['text']
+        font = self.view._bold if segment.get('bold') else self.view._font
+        dc = wx.ClientDC(self.view)
+        dc.SetFont(font)
+        
+        # Binary search would be more efficient, but simple linear search for now
+        best_pos = 0
+        best_distance = abs(click_x_in_segment)
+        
+        for i in range(len(text) + 1):
+            substr = text[:i]
+            width = dc.GetTextExtent(substr)[0]
+            distance = abs(width - click_x_in_segment)
+            
+            if distance < best_distance:
+                best_distance = distance
+                best_pos = i
+        
+        return best_pos
 
     def layout_valid(self, entry_id: str, text_width: int) -> bool:
         ld = self._cache.get(entry_id, {}).get("layout_data")

@@ -4,6 +4,8 @@ import wx
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 
+from core.log import Log
+
 __all__ = ["TextRun", "RichText", "EditState"]
 
 
@@ -116,27 +118,38 @@ class RichText:
         return len(self.to_plain_text())
 
     def _normalize(self):
-        """Merge adjacent runs with same formatting and remove empty runs."""
+        """Merge adjacent runs with same formatting, remove empties and prevent isolated newlines."""
         if not self.runs:
             self.runs = [TextRun("")]
             return
 
-        # Remove empty runs except if it's the only one
-        self.runs = [run for run in self.runs if run.content or len(self.runs) == 1]
-
+        # Remove empty runs
+        self.runs = [run for run in self.runs if run.content]
         if not self.runs:
             self.runs = [TextRun("")]
             return
 
         # Merge adjacent runs with same formatting
-        merged = [self.runs[0]]
-        for run in self.runs[1:]:
-            if merged[-1].same_format(run):
+        merged = []
+        for run in self.runs:
+            if merged and merged[-1].same_format(run):
                 merged[-1].content += run.content
             else:
                 merged.append(run)
 
-        self.runs = merged
+        # Fix runs that start with newlines by merging them with previous run
+        fixed = []
+        for i, run in enumerate(merged):
+            if (i > 0 and 
+                run.content.startswith('\n') and 
+                fixed and 
+                fixed[-1].same_format(run)):
+                # Merge this run with the previous one
+                fixed[-1].content += run.content
+            else:
+                fixed.append(run)
+
+        self.runs = fixed if fixed else [TextRun("")]
 
     def insert_text(self, position: int, text: str, formatting: Optional[TextRun] = None):
         """Insert text at the given character position with optional formatting."""
@@ -394,21 +407,25 @@ class EditState:
         if not self.rich_text:
             return
 
-        new_pos = max(0, min(self.rich_text.char_count(), self.cursor_pos + delta))
+        Log.debug(f"EditState.move_cursor: delta={delta}, current pos={self.cursor_pos}", 75)
+        old_pos = self.cursor_pos
+        new_pos = max(0, min(self.rich_text.char_count(), old_pos + delta))
 
         # Check if the new position would be inside a link
         link_boundaries = self._get_link_boundaries(new_pos)
         if link_boundaries:
             start, end = link_boundaries
-            # If we would land inside a link, jump to the appropriate boundary
             if start < new_pos < end:
-                if delta < 0:  # Moving left - go to start of link
+                if delta < 0:
+                    # Moving left - go to start of link
                     new_pos = start
-                else:  # Moving right - go to end of link
+                else:
+                    # Moving right - go to end of link
                     new_pos = end
 
         self.cursor_pos = new_pos
         self.clear_selection()
+        Log.debug(f"EditState.move_cursor: final pos={self.cursor_pos}", 75)
 
     def has_selection(self) -> bool:
         """Check if there's an active text selection."""
@@ -473,7 +490,13 @@ class EditState:
         if not self.rich_text:
             return
 
-        # We need to apply formatting run by run to preserve existing formats
+        # DEBUG: Log the selection and current text
+        #plain_text = self.rich_text.to_plain_text()
+        #selected_text = plain_text[start:end]
+        #print(f"Formatting range {start}-{end}: {repr(selected_text)}")
+        #print(f"Full text before: {repr(plain_text)}")
+        #print(f"Runs before: {[(i, repr(run.content)) for i, run in enumerate(self.rich_text.runs)]}")
+
         char_pos = 0
         new_runs = []
 
@@ -482,13 +505,11 @@ class EditState:
             run_end = char_pos + len(run.content)
 
             if run_end <= start:
-                # Run is completely before selection - keep as is
                 new_runs.append(run.copy())
             elif run_start >= end:
-                # Run is completely after selection - keep as is
                 new_runs.append(run.copy())
             elif run_start >= start and run_end <= end:
-                # Run is completely within selection - apply formatting
+                # Run completely within selection
                 new_run = run.copy()
                 if 'color' in formatting:
                     new_run.color = formatting['color']
@@ -500,38 +521,27 @@ class EditState:
                     new_run.italic = formatting['italic']
                 new_runs.append(new_run)
             else:
-                # Run partially overlaps selection - need to split
+                # Partial overlap - split carefully
                 before_text = ""
                 selected_text = ""
                 after_text = ""
 
                 if run_start < start:
-                    # Part before selection
                     chars_before = start - run_start
                     before_text = run.content[:chars_before]
 
-                # Part within selection
                 sel_start_in_run = max(0, start - run_start)
                 sel_end_in_run = min(len(run.content), end - run_start)
                 selected_text = run.content[sel_start_in_run:sel_end_in_run]
 
                 if run_end > end:
-                    # Part after selection
                     chars_after_sel = end - run_start
                     after_text = run.content[chars_after_sel:]
 
                 # Add the parts
                 if before_text:
-                    new_runs.append(TextRun(
-                        content=before_text,
-                        bold=run.bold,
-                        italic=run.italic,
-                        color=run.color,
-                        bg=run.bg
-                    ))
-
+                    new_runs.append(TextRun(before_text, run.bold, run.italic, run.color, run.bg))
                 if selected_text:
-                    # Apply formatting to selected part, preserving other attributes
                     new_run = run.copy()
                     new_run.content = selected_text
                     if 'color' in formatting:
@@ -543,21 +553,18 @@ class EditState:
                     if 'italic' in formatting:
                         new_run.italic = formatting['italic']
                     new_runs.append(new_run)
-
                 if after_text:
-                    new_runs.append(TextRun(
-                        content=after_text,
-                        bold=run.bold,
-                        italic=run.italic,
-                        color=run.color,
-                        bg=run.bg
-                    ))
+                    new_runs.append(TextRun(after_text, run.bold, run.italic, run.color, run.bg))
 
             char_pos = run_end
 
-        # Replace the runs and normalize
         self.rich_text.runs = new_runs
         self.rich_text._normalize()
+
+        # DEBUG: Log after changes
+        #new_plain_text = self.rich_text.to_plain_text()
+        #print(f"Full text after: {repr(new_plain_text)}")
+        #print(f"Runs after: {[(i, repr(run.content)) for i, run in enumerate(self.rich_text.runs)]}")
 
     def _sync_toolbar_colors(self):
         """Sync toolbar color pickers with current format state."""

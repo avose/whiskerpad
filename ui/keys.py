@@ -3,80 +3,105 @@
 from __future__ import annotations
 
 import wx
-
+from core.log import Log
 from ui.scroll import visible_range
 from ui.select import select_row, select_entry_id
 from ui.row import has_children
 from ui.notebook_text import rich_text_from_entry
 from ui.edit_state import find_word_boundaries
 
-# ------------ Multi-line text navigation helpers ------------
+# ------------ Multi-line text navigation helpers using cache ------------
 
-def _move_cursor_up_line(edit_state, plain_text):
-    """Move cursor up one line, preserving column position when possible."""
+def _get_line_info_from_cache(view, entry_id: str):
+    """Get line boundary information from cache."""
+    # Find the row for this entry_id to get the level
+    row = None
+    for r in view._rows:
+        if r.entry_id == entry_id:
+            row = r
+            break
+    
+    if not row:
+        return []
+    
+    # Get cached layout data
+    from ui.layout import client_text_width, ensure_wrap_cache
+    width = client_text_width(view, row.level)
+    if not view.cache.layout_valid(entry_id, width):
+        ensure_wrap_cache(view, row)
+    
+    layout = view.cache.layout(entry_id)
+    if not layout or layout.get("is_img"):
+        return []
+    
+    return layout.get("rich_lines", [])
+
+def _get_line_col_from_position(view, entry_id: str, pos: int):
+    """Get line and column from character position using cached line boundaries."""
+    rich_lines = _get_line_info_from_cache(view, entry_id)
+    
+    for line_idx, line in enumerate(rich_lines):
+        start_char = line['start_char']
+        end_char = line['end_char']
+        
+        # Normal case: position within line
+        if start_char <= pos < end_char:
+            col = pos - start_char
+            Log.debug(f"pos {pos} mapped to line {line_idx}, col {col}", 75)
+            return line_idx, col
+        
+        # Special case: position at end of line (but not the last line)
+        if pos == end_char and line_idx < len(rich_lines) - 1:
+            col = end_char - start_char
+            Log.debug(f"pos {pos} mapped to end of line {line_idx}, col {col}", 75)
+            return line_idx, col
+    
+    # Position at end of entire text - map to last line
+    if rich_lines:
+        last_line = rich_lines[-1]
+        col = pos - last_line['start_char']
+        Log.debug(f"pos {pos} mapped to last line {len(rich_lines) - 1}, col {col}", 75)
+        return len(rich_lines) - 1, col
+    
+    return 0, 0
+
+def _get_position_from_line_col(view, entry_id: str, line_idx: int, col: int):
+    """Get character position from line and column using cached boundaries."""
+    rich_lines = _get_line_info_from_cache(view, entry_id)
+    
+    if line_idx < 0 or line_idx >= len(rich_lines):
+        return None
+    
+    line = rich_lines[line_idx]
+    line_length = line['end_char'] - line['start_char']
+    clamped_col = min(col, line_length)
+    
+    return line['start_char'] + clamped_col
+
+def _move_cursor_up_line(edit_state, view):
+    """Move cursor up one line using cached line boundaries."""
+    entry_id = edit_state.entry_id
     cursor_pos = edit_state.cursor_pos
-    lines = plain_text.split('\n')
-    current_line, current_col = _get_line_col_from_position(plain_text, cursor_pos)
-
+    
+    current_line, current_col = _get_line_col_from_position(view, entry_id, cursor_pos)
+    
     if current_line <= 0:
-        return None
+        return None  # Already on first line
+    
+    return _get_position_from_line_col(view, entry_id, current_line - 1, current_col)
 
-    prev_line = lines[current_line - 1]
-    target_col = min(current_col, len(prev_line))
-    new_pos = _get_position_from_line_col(lines, current_line - 1, target_col)
-    return new_pos
-
-def _move_cursor_down_line(edit_state, plain_text):
-    """Move cursor down one line, preserving column position when possible."""
+def _move_cursor_down_line(edit_state, view):
+    """Move cursor down one line using cached line boundaries."""
+    entry_id = edit_state.entry_id
     cursor_pos = edit_state.cursor_pos
-    lines = plain_text.split('\n')
-    current_line, current_col = _get_line_col_from_position(plain_text, cursor_pos)
-
-    if current_line >= len(lines) - 1:
-        return None
-
-    next_line = lines[current_line + 1]
-    target_col = min(current_col, len(next_line))
-    new_pos = _get_position_from_line_col(lines, current_line + 1, target_col)
-    return new_pos
-
-def _get_line_col_from_position(text, pos):
-    """Get line and column numbers from character position."""
-    lines = text.split('\n')
-    current_pos = 0
-    for line_idx, line in enumerate(lines):
-        line_end = current_pos + len(line)
-        if pos <= line_end:
-            col = pos - current_pos
-            return line_idx, col
-        current_pos = line_end + 1
-
-    return len(lines) - 1, len(lines[-1]) if lines else 0
-
-def _get_position_from_line_col(lines, line_idx, col):
-    """Get character position from line and column numbers."""
-    if line_idx < 0 or line_idx >= len(lines):
-        return None
-
-    pos = 0
-    for i in range(line_idx):
-        pos += len(lines[i]) + 1
-
-    pos += min(col, len(lines[line_idx]))
-    return pos
-
-def _get_cursor_line_and_column(text: str, cursor_pos: int) -> tuple[int, int]:
-    """Get the line index and column position of the cursor."""
-    lines = text.split('\n')
-    current_pos = 0
-    for line_idx, line in enumerate(lines):
-        line_end = current_pos + len(line)
-        if cursor_pos <= line_end:
-            col = cursor_pos - current_pos
-            return line_idx, col
-        current_pos = line_end + 1
-
-    return len(lines) - 1, len(lines[-1]) if lines else 0
+    
+    current_line, current_col = _get_line_col_from_position(view, entry_id, cursor_pos)
+    rich_lines = _get_line_info_from_cache(view, entry_id)
+    
+    if current_line >= len(rich_lines) - 1:
+        return None  # Already on last line
+    
+    return _get_position_from_line_col(view, entry_id, current_line + 1, current_col)
 
 def _handle_single_line_arrow_navigation(view, key_code) -> bool:
     """Handle up/down arrows for single-line entries - move between rows."""
@@ -96,6 +121,11 @@ def _handle_single_line_arrow_navigation(view, key_code) -> bool:
 
     return False
 
+def _is_single_line_text(view, entry_id: str) -> bool:
+    """Check if entry has only one line of text using cached data."""
+    rich_lines = _get_line_info_from_cache(view, entry_id)
+    return len(rich_lines) <= 1
+
 def _move_to_previous_row(view) -> bool:
     """Move selection to previous row, entering edit mode only if not an image row."""
     if view._sel > 0:
@@ -104,12 +134,14 @@ def _move_to_previous_row(view) -> bool:
 
         prev_row = view._rows[view._sel]
         layout = view.cache.layout(prev_row.entry_id) or {}
+
         if layout.get("is_img"):
             return True
 
         prev_entry = view._get(prev_row.entry_id)
         prev_rich_text = rich_text_from_entry(prev_entry)
         cursor_pos = prev_rich_text.char_count()
+
         view.enter_edit_mode(view._sel, cursor_pos)
         return True
 
@@ -123,6 +155,7 @@ def _move_to_next_row(view) -> bool:
 
         next_row = view._rows[view._sel]
         layout = view.cache.layout(next_row.entry_id) or {}
+
         if layout.get("is_img"):
             return True
 
@@ -250,6 +283,11 @@ def _handle_cursor_keys(view, evt) -> bool:
     code = evt.GetKeyCode()
 
     if code == wx.WXK_LEFT:
+        Log.debug(
+            f"_handle_cursor_keys: LEFT arrow pressed, "
+            f"cursor_pos={view._edit_state.cursor_pos}",
+            75,
+        )
         if evt.ShiftDown():
             new_pos = max(0, view._edit_state.cursor_pos - 1)
             view._edit_state.extend_selection_to(new_pos)
@@ -259,9 +297,15 @@ def _handle_cursor_keys(view, evt) -> bool:
         else:
             view._edit_state.clear_selection()
             view.move_cursor(-1)
+        Log.debug(f"_handle_cursor_keys: new cursor_pos={view._edit_state.cursor_pos}", 75)
         return True
 
     elif code == wx.WXK_RIGHT:
+        Log.debug(
+            f"_handle_cursor_keys: RIGHT arrow pressed, "
+            f"cursor_pos={view._edit_state.cursor_pos}",
+            75,
+        )
         if evt.ShiftDown():
             max_pos = view._edit_state.rich_text.char_count() if view._edit_state.rich_text else 0
             new_pos = min(max_pos, view._edit_state.cursor_pos + 1)
@@ -272,41 +316,42 @@ def _handle_cursor_keys(view, evt) -> bool:
         else:
             view._edit_state.clear_selection()
             view.move_cursor(1)
+        Log.debug(f"_handle_cursor_keys: new cursor_pos={view._edit_state.cursor_pos}", 75)
         return True
 
     return False
 
 def _handle_vertical_keys(view, evt) -> bool:
     """Handle up/down arrow keys for multi-line text and inter-row navigation."""
+    # Vertical arrow key handler using cache
     if not view._edit_state.active or not view._edit_state.rich_text:
         return False
 
-    plain_text = view._edit_state.rich_text.to_plain_text()
-    cursor_pos = view._edit_state.cursor_pos
+    entry_id = view._edit_state.entry_id
     code = evt.GetKeyCode()
 
-    # For single-line text, let it fall through to row navigation
-    if '\n' not in plain_text:
+    # Check if this is single-line text using cached data
+    if _is_single_line_text(view, entry_id):
         return _handle_single_line_arrow_navigation(view, code)
 
     # Multi-line text - check if we're at boundary lines
-    line_idx, col = _get_cursor_line_and_column(plain_text, cursor_pos)
-    lines = plain_text.split('\n')
+    current_line, current_col = _get_line_col_from_position(view, entry_id, view._edit_state.cursor_pos)
+    rich_lines = _get_line_info_from_cache(view, entry_id)
 
     if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
-        if line_idx == 0:
+        if current_line == 0:
             return _move_to_previous_row(view)
         else:
-            new_pos = _move_cursor_up_line(view._edit_state, plain_text)
+            new_pos = _move_cursor_up_line(view._edit_state, view)
             if new_pos is not None:
                 _update_cursor_position(view, new_pos)
             return True
 
     elif code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
-        if line_idx == len(lines) - 1:
+        if current_line >= len(rich_lines) - 1:
             return _move_to_next_row(view)
         else:
-            new_pos = _move_cursor_down_line(view._edit_state, plain_text)
+            new_pos = _move_cursor_down_line(view._edit_state, view)
             if new_pos is not None:
                 _update_cursor_position(view, new_pos)
             return True
