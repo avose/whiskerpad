@@ -197,13 +197,13 @@ class VersionManager:
                     Log.debug(f"Auto-commit successful", 1)
                 except GitError as e:
                     # Log but don't raise - auto-commit failures shouldn't break workflow
-                    Log.debug(f"Auto-commit failed: {e}", 0)
+                    Log.debug(f"Auto-commit failed: {e}")
                     
             self.io_worker.submit(async_commit)
 
         except Exception as e:
             # Catch-all to ensure auto-commit never crashes the application
-            Log.debug(f"Auto-commit check failed: {e}", 0)
+            Log.debug(f"Auto-commit check failed: {e}")
 
     def _generate_auto_commit_message(self, notebook_dir: str) -> Optional[str]:
         """
@@ -341,7 +341,7 @@ class VersionManager:
                 state.readonly_commit = commit_hash
             Log.debug(f"Successfully checked out commit {commit_hash[:8]}", 1)
         else:
-            Log.debug(f"Failed to checkout commit {commit_hash[:8]}", 0)
+            Log.debug(f"Failed to checkout commit {commit_hash[:8]}")
                 
         return success
 
@@ -373,7 +373,7 @@ class VersionManager:
                 state.in_history_mode = False
             Log.debug(f"History browser closed (editing mode restored)", 1)
         else:
-            Log.debug(f"Failed to return to HEAD.", 0)
+            Log.debug(f"Failed to return to HEAD.")
 
         return success
 
@@ -401,7 +401,7 @@ class VersionManager:
                 Log.debug(f"History consolidation not needed.", 1)
             return success
         except GitError as e:
-            Log.debug(f"History consolidation failed: {e}", 0)
+            Log.debug(f"History consolidation failed: {e}")
             return False
 
     def is_in_history_mode(self, notebook_dir: str) -> bool:

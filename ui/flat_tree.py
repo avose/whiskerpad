@@ -5,13 +5,15 @@ from typing import List, Optional, Set
 import wx
 import shutil
 
+from core.log import Log
 from core.tree_utils import (
     add_sibling_after,
     move_entry_after, 
     indent_under_prev_sibling,
     outdent_to_parent_sibling,
     toggle_collapsed,
-    get_ancestors
+    set_collapsed,
+    get_ancestors,
 )
 from core.tree import (
     create_node,
@@ -55,11 +57,12 @@ class FlatTree:
         for row in self.view._rows:
             try:
                 entry = self.view._get(row.entry_id)
-                is_collapsed = entry.get("collapsed", False)
-                if is_collapsed:
-                    self._transient_collapsed[row.entry_id] = True
-            except:
-                pass
+                is_collapsed = entry.get_collapsed(False)
+            except Exception:
+                # Skip entries that can't be loaded, don't break the entire operation
+                continue
+            if is_collapsed:
+                self.transient_collapsed[row.entry_id] = True
 
     def exit_read_only_mode(self):
         """Exit read-only mode - discard transient state"""
@@ -79,7 +82,20 @@ class FlatTree:
                 return False
 
     @check_read_only
-    def create_sibling_after(self, target_id: str, title: str = "") -> str:
+    def create_siblings_batch(self, target_id: str, count: int) -> List[str]:
+        """Efficiently create multiple siblings (for PDF import)."""
+        new_ids = []
+        current_target = target_id
+        
+        for ndx in range(count):
+            new_id = self.create_sibling_after(current_target)
+            new_ids.append(new_id)
+            current_target = new_id  # Chain insertions
+            
+        return new_ids
+
+    @check_read_only
+    def create_sibling_after(self, target_id: str) -> str:
         """Create sibling after target with proper descendant handling."""
         # 1. Create in persistent tree
         new_id = add_sibling_after(self.notebook_dir, target_id)
@@ -107,9 +123,14 @@ class FlatTree:
         return new_id
     
     @check_read_only
-    def create_child_under(self, parent_id: str, title: str = "", index: Optional[int] = None) -> str:
+    def create_child_under(
+            self,
+            parent_id: str,
+            content: Optional[List[Dict[str, Any]]] = None,
+            index: Optional[int] = None,
+    ) -> str:
         """Create child under parent at specified index (or end)."""
-        new_id = create_node(self.notebook_dir, parent_id=parent_id, title=title, insert_index=index)
+        new_id = create_node(self.notebook_dir, parent_id=parent_id, content=content, insert_index=index)
         
         # Find insertion point in flat list
         parent_idx = self._find_row_index(parent_id)
@@ -126,10 +147,39 @@ class FlatTree:
         
         self._update_after_insertion(insert_idx, new_row)
         return new_id
-    
+
+    def _is_target_descendant_of_source(self, source_id: str, target_id: str) -> bool:
+        """Check if target is a descendant of source by walking up from target to root.
+        Returns True if moving source to target would create a circular dependency."""
+
+        # Walk up the tree from target toward root
+        current_id = target_id
+
+        while current_id:
+            if current_id == source_id:
+                # Found source in target's ancestry - would create cycle
+                return True
+
+            try:
+                # Get parent of current entry
+                entry = load_entry(self.notebook_dir, current_id)
+                if not entry:
+                    # Reached root or missing entry
+                    break
+                # May be None at root
+                current_id = entry.get("parent_id")
+            except Exception:
+                # Entry is corrupted or missing, can't continue traversal
+                break
+
+        # Reached root without finding source - move is safe
+        return False
+
     @check_read_only
     def move_entry_after(self, source_id: str, target_id: str) -> bool:
         """Move source entry to be after target."""
+        if self._is_target_descendant_of_source(source_id, target_id):
+            return False
         if not move_entry_after(self.notebook_dir, source_id, target_id):
             return False
             
@@ -143,64 +193,63 @@ class FlatTree:
         Delete the entry and all descendants, including disk cleanup,
         cache invalidation, and view refresh.
         """
-        try:
-            # 1. Collect all descendants recursively
-            to_delete = set()
+        # 1. Collect all descendants recursively
+        to_delete = set()
 
-            def _collect_descendants(eid: str):
-                if eid in to_delete:
-                    return  # Avoid infinite loops
-                to_delete.add(eid)
-
+        def _collect_descendants(eid: str):
+            if eid in to_delete:
+                return  # Avoid infinite loops
+            to_delete.add(eid)
+            try:
                 entry = load_entry(self.notebook_dir, eid)
                 for item in entry.get("items", []):
                     if isinstance(item, dict) and item.get("type") == "child":
                         child_id = item.get("id")
                         if isinstance(child_id, str):
                             _collect_descendants(child_id)
+            except Exception as e:
+                Log.debug(f"Failed to load descendants for {eid}: {e}")
 
-            _collect_descendants(entry_id)
+        _collect_descendants(entry_id)
 
-            # 2. Remove from parent's items or root_ids
-            entry = load_entry(self.notebook_dir, entry_id)
-            parent_id = entry.get("parent_id")
+        # 2. Remove from parent's items or root_ids
+        entry = load_entry(self.notebook_dir, entry_id)
+        parent_id = entry.get("parent_id")
 
-            if parent_id:
-                # Remove from parent's items list
-                parent = load_entry(self.notebook_dir, parent_id)
-                items = parent.get("items", [])
-                parent["items"] = [
-                    item for item in items
-                    if not (isinstance(item, dict) and 
-                           item.get("type") == "child" and 
-                           item.get("id") == entry_id)
-                ]
-                save_entry(self.notebook_dir, parent)
-            else:
-                # Remove from root_ids
-                root_ids = get_root_ids(self.notebook_dir)
-                if entry_id in root_ids:
-                    root_ids.remove(entry_id)
-                    set_root_ids(self.notebook_dir, root_ids)
+        if parent_id:
+            # Remove from parent's items list
+            parent = load_entry(self.notebook_dir, parent_id)
+            items = parent.get("items", [])
+            parent["items"] = [
+                item for item in items
+                if not (isinstance(item, dict) and 
+                       item.get("type") == "child" and 
+                       item.get("id") == entry_id)
+            ]
+            save_entry(self.notebook_dir, parent)
+        else:
+            # Remove from root_ids
+            root_ids = get_root_ids(self.notebook_dir)
+            if entry_id in root_ids:
+                root_ids.remove(entry_id)
+                set_root_ids(self.notebook_dir, root_ids)
 
-            # 3. Delete all entry directories from disk
-            for eid in to_delete:
-                entry_path = entry_dir(self.notebook_dir, eid)
-                if entry_path.exists():
+        # 3. Delete all entry directories from disk
+        for eid in to_delete:
+            entry_path = entry_dir(self.notebook_dir, eid)
+            if entry_path.exists():
+                try:
                     shutil.rmtree(entry_path)
+                except (OSError, PermissionError) as e:
+                    Log.debug(f"Failed to delete entry directory {entry_path}: {e}")
 
-            # 4. Invalidate cache for deleted entries
-            self.view.cache.invalidate_entries(to_delete)
+        # 4. Invalidate cache for deleted entries
+        self.view.cache.invalidate_entries(to_delete)
 
-            # 5. Rebuild view to reflect changes
-            self.view.rebuild()
+        # 5. Rebuild view to reflect changes
+        self.view.rebuild()
 
-            return True
-
-        except Exception as e:
-            # Could enhance with proper logging
-            print(f"Failed to delete entry {entry_id}: {e}")
-            return False
+        return True
     
     @check_read_only
     def indent_entry(self, entry_id: str) -> bool:
@@ -220,101 +269,84 @@ class FlatTree:
             
         self._refresh_hierarchy_change(entry_id)
         return True
-    
-    def toggle_collapse(self, entry_id: str) -> bool:
-        """Toggle collapse with read-only awareness"""
+
+    # ------------------------------------------------------------------ #
+    # Collapse / Show / Toggle display of children.
+    # ------------------------------------------------------------------ #
+
+    def set_collapsed_state(self, entry_id: str, collapsed: bool) -> bool:
+        """Set the collapsed state of an entry. Returns True if state changed."""
+        current_state = self.is_collapsed(entry_id)
+        if current_state == collapsed:
+            return False  # No change needed
+
         if self.view.is_read_only():
-            # In read-only mode - update transient state only
-            current_state = self._transient_collapsed.get(entry_id, False)
-            self._transient_collapsed[entry_id] = not current_state
-
-            # Update UI using existing incremental update logic
-            self.view.invalidate_subtree_cache(entry_id)
-            self.view._rows = update_tree_incremental(
-                self.notebook_dir,
-                self.view._rows,
-                entry_id,
-                self.view,
-            )
-            self.view._index.rebuild(self.view, self.view._rows)
-            self.view.SetVirtualSize((-1, self.view._index.content_height()))
-            self.view._refresh_changed_area(entry_id)
-            return True
+            # Update transient state
+            self._transient_collapsed[entry_id] = collapsed
         else:
-            # Normal mode - persist the change (existing code)
-            toggle_collapsed(self.notebook_dir, entry_id)
+            # Update persistent state
+            set_collapsed(self.notebook_dir, entry_id, collapsed)
 
-            self.view.invalidate_subtree_cache(entry_id)
-            self.view._rows = update_tree_incremental(
-                self.notebook_dir,
-                self.view._rows,
-                entry_id,
-                self.view,
-            )
-            self.view._index.rebuild(self.view, self.view._rows)
-            self.view.SetVirtualSize((-1, self.view._index.content_height()))
-            self.view._refresh_changed_area(entry_id)
-            return True
+        # Do the full UI update (borrowed from toggle_collapse)
+        self.view.invalidate_subtree_cache(entry_id)
+        self.view._rows = update_tree_incremental(
+            self.notebook_dir, self.view._rows, entry_id, self.view
+        )
+        self.view._index.rebuild(self.view, self.view._rows)
+        self.view.SetVirtualSize((-1, self.view._index.content_height()))
+        self.view._refresh_changed_area(entry_id)
+        return True
 
-    @check_read_only
-    def create_siblings_batch(self, target_id: str, titles: List[str]) -> List[str]:
-        """Efficiently create multiple siblings (for PDF import)."""
-        new_ids = []
-        current_target = target_id
-        
-        for title in titles:
-            new_id = self.create_sibling_after(current_target, title)
-            new_ids.append(new_id)
-            current_target = new_id  # Chain insertions
-            
-        return new_ids
-    
-    # ------------------------------------------------------------------ #
-    # Navigation and ancestor expansion (moved from tree_utils.py)
-    # ------------------------------------------------------------------ #
-    
+    def expand_entry(self, entry_id: str) -> bool:
+        """Expand a single entry. Returns True if expansion occurred."""
+        return self.set_collapsed_state(entry_id, False)
+
+    def collapse_entry(self, entry_id: str) -> bool:
+        """Collapse a single entry. Returns True if collapse occurred."""
+        return self.set_collapsed_state(entry_id, True)
+
+    def toggle_collapse(self, entry_id: str) -> bool:
+        """Toggle collapse state of entry."""
+        current_state = self.is_collapsed(entry_id)
+        return self.set_collapsed_state(entry_id, not current_state)
+   
     def expand_ancestors(self, entry_id: str) -> bool:
-        """Expand all collapsed ancestors of the target entry. Returns True if any were expanded."""
-        try:
-            ancestors = get_ancestors(self.notebook_dir, entry_id)
-        except Exception:
-            return False
-
+        """Expand all ancestors of the target entry. Returns True if any were expanded."""
         expanded_any = False
 
+        # Get all ancestor IDs using the existing helper from core.tree_utils
+        ancestors = get_ancestors(self.notebook_dir, entry_id)
+
+        # Expand each ancestor using the unified state setter
         for ancestor_id in ancestors:
-            try:
-                # Check current collapsed state (respecting transient state)
-                is_collapsed = False
+            if self.set_collapsed_state(ancestor_id, False):
+                expanded_any = True
 
-                if self.view.is_read_only():
-                    # In read-only mode, check transient state
-                    is_collapsed = self._transient_collapsed.get(ancestor_id, False)
-                    if not is_collapsed:
-                        # Check persistent state as fallback
-                        ancestor_entry = self.view._get(ancestor_id)
-                        is_collapsed = ancestor_entry.get("collapsed", False)
-                else:
-                    # Normal mode, check persistent state
-                    ancestor_entry = self.view._get(ancestor_id)
-                    is_collapsed = ancestor_entry.get("collapsed", False)
+        # No need for self.view.rebuild() since set_collapsed_state handles UI updates
+        return expanded_any
 
-                # Expand if collapsed
-                if is_collapsed:
-                    if self.view.is_read_only():
-                        # Expand transiently in read-only mode
-                        self._transient_collapsed[ancestor_id] = False
-                    else:
-                        # Expand persistently in normal mode
-                        from core.tree_utils import set_collapsed
-                        set_collapsed(self.notebook_dir, ancestor_id, False)
-                        self.view.invalidate_cache(ancestor_id)
+    def expand_descendants(self, entry_id: str) -> bool:
+        """Expand the starting node and all of its collapsed descendants."""
+        expanded_any = False
 
-                    expanded_any = True
+        # Expand start node itself
+        if self.expand_entry(entry_id):
+            expanded_any = True
 
-            except Exception:
-                # Skip ancestors that don't exist or can't be loaded
-                continue
+        # Expand all descendants
+        start_idx = self._find_row_index(entry_id)
+        if start_idx is None:
+            return expanded_any
+
+        start_level = self.view._rows[start_idx].level
+        i = start_idx + 1
+        while i < len(self.view._rows):
+            row = self.view._rows[i]
+            if row.level <= start_level:
+                break
+            if self.expand_entry(row.entry_id):
+                expanded_any = True
+            i += 1
 
         return expanded_any
 
@@ -326,8 +358,8 @@ class FlatTree:
         # 1. Check if target entry exists
         try:
             target_entry = self.view._get(entry_id)
-        except Exception:
-            return False  # Entry doesn't exist
+        except:
+            return False
 
         # 2. Expand all collapsed ancestors
         expanded_any = self.expand_ancestors(entry_id)
@@ -337,11 +369,7 @@ class FlatTree:
             self.view.rebuild()
 
         # 4. Navigate to the target entry
-        try:
-            success = self.view.select_entry(entry_id, ensure_visible=True)
-            return success
-        except Exception:
-            return False
+        success = self.view.select_entry(entry_id, ensure_visible=True)
     
     # ------------------------------------------------------------------ #
     # Helper methods
@@ -373,13 +401,19 @@ class FlatTree:
     def _update_after_insertion(self, insert_idx: int, new_row: Row):
         """Update layout and UI after row insertion."""
         self.view._index.insert_row(self.view, insert_idx, new_row)
-        self.view.cache.invalidate_entry(new_row.entry_id)
+        try:
+            self.view.cache.invalidate_entry(new_row.entry_id)
+        except Exception as e:
+            Log.debug(f"Cache invalidation failed for {new_row.entry_id}: {e}")
         self.view.SetVirtualSize((-1, self.view._index.content_height()))
         self.view._refresh_from_row(insert_idx)
     
     def _refresh_hierarchy_change(self, entry_id: str):
         """Refresh after hierarchy change (indent/outdent)."""
-        self.view.cache.invalidate_entry(entry_id)
+        try:
+            self.view.cache.invalidate_entry(entry_id)
+        except Exception as e:
+            Log.debug(f"Cache invalidation failed for {entry_id}: {e}")
         self.view.rebuild()  # Could be optimized to incremental later
         
         # Restore selection to the moved entry

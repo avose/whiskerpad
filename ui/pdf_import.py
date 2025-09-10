@@ -210,7 +210,8 @@ class ImportPDFDialog(wx.Dialog):
         # File selection section
         self.file_label = wx.StaticText(self, label="PDF File:")
         self.file_path = wx.TextCtrl(self, style=wx.TE_READONLY)
-        self.browse_button = wx.Button(self, label="Browse...")
+        self.browse_button = wx.Button(self, label=" Browse...")
+        self.browse_button.SetBitmap(wpIcons.Get("page_white_acrobat"))
         
         # PDF info display
         self.pdf_info_label = wx.StaticText(self, label="")
@@ -233,8 +234,10 @@ class ImportPDFDialog(wx.Dialog):
         self.status_label = wx.StaticText(self, label="Ready")
         
         # Custom dialog buttons with icon
-        self.import_button = wx.Button(self, wx.ID_ANY, " Import")  # Space for icon
-        self.cancel_button = wx.Button(self, wx.ID_CANCEL, "Cancel")
+        self.import_button = wx.Button(self, wx.ID_ANY, " Import")
+        self.import_button.SetBitmap(wpIcons.Get("tick"))
+        self.cancel_button = wx.Button(self, wx.ID_CANCEL, " Cancel")
+        self.cancel_button.SetBitmap(wpIcons.Get("cross"))
         
         # Set icon on import button
         import_icon = wpIcons.Get("page_white_acrobat")
@@ -540,7 +543,7 @@ class ImportPDFDialog(wx.Dialog):
                 # Handle first page in empty notebook differently
                 if not has_children and i == 0:
                     # Use FlatTree instead of create_node
-                    new_id = view.flat_tree.create_child_under(current_id, title="")
+                    new_id = view.flat_tree.create_child_under(current_id)
                 else:
                     # Use FlatTree instead of add_sibling_after
                     insert_after_id = last_inserted_id if last_inserted_id else current_id

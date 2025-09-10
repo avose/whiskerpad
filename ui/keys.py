@@ -220,63 +220,24 @@ def _handle_escape_key(view) -> bool:
     return True
 
 def _handle_enter_key(view, evt) -> bool:
-    """Handle Enter key using FlatTree."""
+    """Handle Enter key in edit mode"""
     if evt.ShiftDown():
-        # Add line break - may change row height
+        # Shift+Enter adds line break
         view.insert_text_at_cursor("\n")
         view.SetVirtualSize((-1, view._index.content_height()))
         from ui.scroll import soft_ensure_visible
         soft_ensure_visible(view, view._edit_state.row_idx)
         return True
     else:
-        # Create new sibling using FlatTree
-        current_entry_id = view._edit_state.entry_id
-        view.exit_edit_mode(save=True)
-        
-        # Use FlatTree for sibling creation
-        new_id = view.flat_tree.create_sibling_after(current_entry_id)
-        
-        if new_id:
-            # Find and start editing the new node immediately
-            for i, row in enumerate(view._rows):
-                if row.entry_id == new_id:
-                    view.enter_edit_mode(i, 0)
-                    from ui.scroll import soft_ensure_visible
-                    soft_ensure_visible(view, i)
-                    break
-        
-        return True
+        # Enter creates new sibling - delegate to MainFrame
+        return view.main_frame.on_action_add_row()
 
 def _handle_tab_key(view, evt) -> bool:
-    """Handle Tab key using FlatTree."""
-    current_entry_id = view._edit_state.entry_id
-    current_cursor_pos = view._edit_state.cursor_pos
-
-    # Save the current edit content
-    if view._edit_state.rich_text:
-        rich_data = view._edit_state.rich_text.to_storage()
-        view.cache.set_edit_rich_text(current_entry_id, rich_data)
-
-        # CRITICAL: Force immediate persistence to disk
-        from core.tree import commit_entry_edit
-        commit_entry_edit(view.notebook_dir, current_entry_id, rich_data)
-
-    # Perform indent/outdent using FlatTree
-    success = False
+    """Handle Tab/Shift+Tab in edit mode - delegate to MainFrame"""
     if evt.ShiftDown():
-        success = view.flat_tree.outdent_entry(current_entry_id)
+        return view.main_frame.on_action_outdent()
     else:
-        success = view.flat_tree.indent_entry(current_entry_id)
-
-    if success:
-        # Find the entry in its new position and re-enter edit mode
-        for i, row in enumerate(view._rows):
-            if row.entry_id == current_entry_id:
-                view.enter_edit_mode(i, current_cursor_pos)
-                view.select_entry(current_entry_id, ensure_visible=True)
-                break
-
-    return True
+        return view.main_frame.on_action_indent()
 
 def _handle_cursor_keys(view, evt) -> bool:
     """Handle left/right arrow keys."""
@@ -510,27 +471,11 @@ def _handle_nav_escape_key(view) -> bool:
     return cleared_something
 
 def _handle_nav_tab_keys(view, evt) -> bool:
-    """Handle Tab/Shift+Tab using FlatTree."""
-    sel = view._sel
-    if not (0 <= sel < len(view._rows)):
-        return False
-
-    cur_id = view._rows[sel].entry_id
-
+    """Handle Tab/Shift+Tab in navigation mode - delegate to MainFrame"""
     if evt.ShiftDown():
-        # Outdent - but don't let top-level entries (level 0) outdent further
-        current_row = view._rows[sel]
-        if current_row.level == 0:
-            return False  # Can't outdent children of hidden root
-
-        success = view.flat_tree.outdent_entry(cur_id)
+        return view.main_frame.on_action_outdent()
     else:
-        success = view.flat_tree.indent_entry(cur_id)
-
-    if success:
-        view.select_entry(cur_id, ensure_visible=False)
-
-    return True
+        return view.main_frame.on_action_indent()
 
 def _handle_nav_arrow_keys(view, evt) -> bool:
     """Handle up/down arrow navigation."""
@@ -601,53 +546,13 @@ def _handle_nav_space_key(view) -> bool:
     return False
 
 def _handle_nav_enter_key(view) -> bool:
-    """Handle Enter key using FlatTree."""
-    if len(view._rows) == 0:
-        # Handle empty notebook case
-        from core.tree import get_root_ids, create_node
-        root_ids = get_root_ids(view.notebook_dir)
-        if root_ids:
-            new_id = create_node(view.notebook_dir, parent_id=root_ids[0], title="")
-            if new_id:
-                view.rebuild()
-                if view._rows:
-                    view.enter_edit_mode(0, 0)
-                return True
-
-    sel = view._sel
-    if not (0 <= sel < len(view._rows)):
-        return False
-
-    cur_id = view._rows[sel].entry_id
-    
-    # Use FlatTree for sibling creation
-    new_id = view.flat_tree.create_sibling_after(cur_id)
-    
-    if new_id:
-        # Find and start editing the new node immediately
-        for i, row in enumerate(view._rows):
-            if row.entry_id == new_id:
-                view.enter_edit_mode(i, 0)
-                from ui.scroll import soft_ensure_visible
-                soft_ensure_visible(view, i)
-                break
-
-    return True
+    """Handle Enter key in navigation mode - delegate to MainFrame"""
+    return view.main_frame.on_action_add_row()
 
 def _handle_nav_delete_keys(view, evt) -> bool:
     """Handle Delete/Backspace keys to delete current row."""
     code = evt.GetKeyCode()
     if code not in (wx.WXK_DELETE, wx.WXK_BACK):
         return False
-
-    sel = view._sel
-    if not (0 <= sel < len(view._rows)):
-        return False
-
-    # Get the main frame and call its delete method
-    main_frame = wx.GetApp().GetTopWindow()
-    if hasattr(main_frame, '_on_delete'):
-        main_frame._on_delete()
-        return True
-
-    return False
+    view.main_frame.on_action_delete()
+    return True

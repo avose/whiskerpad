@@ -92,7 +92,7 @@ def init_repository(notebook_dir: str) -> bool:
             pass
     
     try:
-        repo = Repo.init(notebook_dir)
+        repo = Repo.init(notebook_dir, initial_branch="master")
         _configure_user_if_needed(repo)
         
         # CRITICAL: Create initial commit for new repositories

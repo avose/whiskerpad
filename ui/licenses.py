@@ -796,6 +796,7 @@ class wpLicenseFrame(wx.Frame):
         # OK button to close.
         box_bottom = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_ok = wx.Button(self, wx.ID_ANY, "Ok")
+        self.btn_ok.SetBitmap(wpIcons.Get("tick"))
         self.btn_ok.Bind(wx.EVT_BUTTON, self.OnOk)
         box_bottom.Add(self.btn_ok, 0, wx.TOP | wx.BOTTOM, 2)
         box_main.Add(box_bottom, 0, wx.ALIGN_RIGHT)

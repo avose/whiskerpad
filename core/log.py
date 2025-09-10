@@ -32,13 +32,14 @@ class LogManager():
         LogManager.__log.append((now, text))
         return
 
-    def debug(self, text: str, level: int):
+    def debug(self, text: str, level: int = 0):
         if self.verbosity >= level:
             # Get caller's filename automatically
             stack = inspect.stack()
             if len(stack) > 1:
                 caller_frame = stack[1]
-                filename = caller_frame.filename.split('/')[-1]  # Just filename, not full path
+                # Just filename, not full path
+                filename = caller_frame.filename.split('/')[-1]
             else:
                 filename = "unknown"
             

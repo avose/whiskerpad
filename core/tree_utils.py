@@ -59,7 +59,7 @@ def add_sibling_after(notebook_dir: str, cur_id: str) -> Optional[str]:
         items = list(parent.get("items", []))
         idx = _find_child_index(items, cur_id)
         insert_index = (idx + 1) if idx >= 0 else len(items)
-        return create_node(notebook_dir, parent_id=parent_id, title="", insert_index=insert_index)
+        return create_node(notebook_dir, parent_id=parent_id, insert_index=insert_index)
 
     # Root case: insert after cur among root_ids
     ids = get_root_ids(notebook_dir)
@@ -68,7 +68,7 @@ def add_sibling_after(notebook_dir: str, cur_id: str) -> Optional[str]:
         return None
 
     idx = ids.index(cur_id)
-    new_id = create_node(notebook_dir, parent_id=None, title="")  # appends by default
+    new_id = create_node(notebook_dir, parent_id=None)  # appends by default
     
     # Refresh and reorder
     ids = get_root_ids(notebook_dir)

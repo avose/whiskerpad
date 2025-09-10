@@ -37,9 +37,14 @@ class Toolbar(wx.Panel):
         self.tools = [
             (wx.ID_OPEN, "Open Notebook", "book_open", "on_action_open"),
             None,  # separator
+            (wx.NewIdRef(), "Add Row", "add", "on_action_add_row"),
             (wx.NewIdRef(), "Add Image(s)", "image_add", "on_action_add_images"),
+            (wx.NewIdRef(), "Create Tab", "tab_add", "on_action_add_tab"),
+            (wx.NewIdRef(), "Outdent Row", "text_indent_remove", "on_action_outdent"),
+            (wx.NewIdRef(), "Indent Row", "text_indent", "on_action_indent"),
+            (wx.NewIdRef(), "Show All", "sitemap", "on_action_show_all"),
+            (wx.NewIdRef(), "Lines to Bullets", "text_list_bullets", "on_action_lines_to_rows"),
             (wx.NewIdRef(), "Delete", "delete", "on_action_delete"),
-            (wx.NewIdRef(), "Create Tab from Selection", "tab_add", "on_action_add_tab"),
             None,  # separator
             (wx.NewIdRef(), "Cut", "cut", "on_action_cut"),
             (wx.NewIdRef(), "Copy", "page_white_copy", "on_action_copy"),
@@ -89,7 +94,18 @@ class Toolbar(wx.Panel):
 
     def _create_special_controls(self):
         """Create color pickers and search control"""
-        
+        # Create clear formatting button
+        clear_icon = wpIcons.Get("style_delete")
+        self.clear_format_btn = wx.BitmapButton(
+            self, 
+            bitmap=clear_icon,
+            style=wx.BU_EXACTFIT | wx.NO_BORDER
+        )
+        self.clear_format_btn.SetToolTip(wx.ToolTip("Clear Formatting"))
+        self.clear_format_btn.SetCanFocus(False)
+        handler = getattr(self.main_frame, "on_action_clear_style")
+        self.clear_format_btn.Bind(wx.EVT_BUTTON, handler)
+
         # Foreground color section
         self.fg_section = self._create_fg_color_section()
         
@@ -180,6 +196,7 @@ class Toolbar(wx.Panel):
         # Add color picker sections
         separator = wx.StaticLine(self, style=wx.LI_VERTICAL)
         main_sizer.Add(separator, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 2)
+        main_sizer.Add(self.clear_format_btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
         main_sizer.Add(self.fg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
         main_sizer.Add(self.bg_section, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 1)
 

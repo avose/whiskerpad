@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import wx
 import os
+from git import Repo
 import shutil
 from pathlib import Path
 from typing import List, Optional
 
+from core.log import Log
 from core.git import CommitInfo, GitError
 from core.version_manager import VersionManager
 from ui.icons import wpIcons
 
 __all__ = ["HistoryBrowserDialog"]
+
 
 class HistoryBrowserDialog(wx.Dialog):
     """
@@ -184,8 +187,9 @@ class HistoryBrowserDialog(wx.Dialog):
         self.save_copy_btn.SetBitmap(disk_icon)
 
         # Close button
-        self.close_btn = wx.Button(button_panel, wx.ID_CLOSE, "Close")
+        self.close_btn = wx.Button(button_panel, wx.ID_CLOSE, "Done")
         self.close_btn.SetToolTip("Close history browser and return to editing")
+        self.close_btn.SetBitmap(wpIcons.Get("tick"))
 
         # Layout buttons
         button_sizer.Add(self.view_btn, 0, wx.ALL, 2)
@@ -412,6 +416,7 @@ class HistoryBrowserDialog(wx.Dialog):
             success = self._clone_notebook_at_commit(dest_path, commit)
             if success:
                 # Show success message
+                Log.debug(f"Notebook copy saved successfully:\n{dest_path}")
                 wx.MessageBox(
                     f"Notebook copy saved successfully to:\n{dest_path}\n\n"
                     f"Version: {commit.date} — {commit.message}\n\n",
@@ -420,6 +425,7 @@ class HistoryBrowserDialog(wx.Dialog):
                     parent=self
                 )
             else:
+                Log.debug("Failed to save notebook copy.")
                 wx.MessageBox(
                     "Failed to save notebook copy.\nSee status bar for details.",
                     "Copy Failed",
@@ -440,29 +446,35 @@ class HistoryBrowserDialog(wx.Dialog):
             self.parent_frame.SetStatusText("Ready")
 
     def _clone_notebook_at_commit(self, dest_path: str, commit: CommitInfo) -> bool:
-        """Clone the notebook repository and checkout the specific commit."""
+        """Create a copy with history up to the selected commit (no fallback)."""
         try:
+            from git import Repo
+            import shutil
+            import os
+
             # Remove destination if it exists
             if os.path.exists(dest_path):
                 shutil.rmtree(dest_path)
 
-            # Git-based cloning (preserves full history)
-            try:
-                from git import Repo
-                repo = Repo.clone_from(self.notebook_dir, dest_path)
-                # Checkout the specific commit
-                repo.git.checkout(commit.hash)
-                self.parent_frame.SetStatusText(f"Git clone successful: {commit.message[:50]}...")
-                return True
+            # Clone repository
+            cloned_repo = Repo.clone_from(self.notebook_dir, dest_path)
 
-            except ImportError:
-                # GitPython not available, fall back to directory copy
-                self.parent_frame.SetStatusText("GitPython not available, using directory copy...")
-            except Exception as git_error:
-                self.parent_frame.SetStatusText(f"Git clone failed: {git_error}, trying directory copy...")
+            # Checkout master branch (guaranteed to exist)
+            cloned_repo.git.checkout('master')
+
+            # Hard reset to the target commit
+            cloned_repo.git.reset('--hard', commit.hash)
+
+            # Garbage collect unreachable commits
+            cloned_repo.git.gc('--prune=now', '--aggressive')
+
+            Log.debug(f"Historical copy created: {commit.message}")
+            self.parent_frame.SetStatusText(f"Historical copy created: {commit.message[:50]}...")
+            return True
 
         except Exception as e:
-            self.parent_frame.SetStatusText(f"Clone operation failed: {e}")
+            Log.debug(f"Failed to create historical copy: {e}")
+            self.parent_frame.SetStatusText(f"Failed to create historical copy: {e}")
             return False
 
     def _on_close(self, event):
@@ -486,6 +498,7 @@ class HistoryBrowserDialog(wx.Dialog):
             self.parent_frame.SetStatusText("Ready")
 
         except GitError as e:
+            Log.debug(f"Error returning from history browser:\n{str(e)}")
             wx.MessageBox(
                 f"Error returning from history browser:\n\n{str(e)}",
                 "Version Control Error",

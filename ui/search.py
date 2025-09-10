@@ -12,7 +12,7 @@ import wx
 import wx.dataview
 
 from core.tree import notebook_paths, load_entry
-
+from ui.icons import wpIcons
 
 class SearchWorkerProcess(mp.Process):
     """Worker process for searching notebook entries."""
@@ -147,18 +147,19 @@ class SearchDialog(wx.Dialog):
     
     def _create_controls(self):
         """Create dialog controls."""
+
         # Search input
         self.search_ctrl = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
         self.search_ctrl.ShowCancelButton(True)
         self.search_ctrl.SetToolTip("Enter search phrase and press Enter")
-        
+
         # Progress bar
         self.progress = wx.Gauge(self, range=100)
         self.progress.Hide()  # Initially hidden
-        
+
         # Status label
         self.status_label = wx.StaticText(self, label="Enter search terms above")
-        
+
         # Results list
         self.results_list = wx.dataview.DataViewListCtrl(self)
 
@@ -180,12 +181,17 @@ class SearchDialog(wx.Dialog):
         if col_count >= 4:
             self.results_list.GetColumn(2).SetHidden(True)  # Hide timestamp column
             self.results_list.GetColumn(3).SetHidden(True)  # Hide entry_id column
-        
-        # Control buttons
+
+        # Control buttons with icons
         self.search_button = wx.Button(self, label="Search")
+        self.search_button.SetBitmap(wpIcons.Get("zoom"))
+
         self.cancel_button = wx.Button(self, wx.ID_CANCEL, label="Cancel")
-        self.close_button = wx.Button(self, wx.ID_CLOSE, label="Close")
-        
+        self.cancel_button.SetBitmap(wpIcons.Get("cross"))
+
+        self.close_button = wx.Button(self, wx.ID_CLOSE, label="Done")
+        self.close_button.SetBitmap(wpIcons.Get("tick"))
+
         # Initially disable cancel
         self.cancel_button.Enable(False)
     

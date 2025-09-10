@@ -35,7 +35,7 @@ class MainFrame(wx.Frame):
     """Main application frame for WhiskerPad application. """
     def __init__(self, verbosity: int = 0):
         super().__init__(None, title="WhiskerPad", size=(900, 700))
-        self.SetMinSize((640, 480))
+        self.SetMinSize((700, 500))
 
         self.io = IOWorker()
         self.version_manager = VersionManager(self.io)
@@ -61,6 +61,30 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_CLOSE, self.Close)
 
     # ---------------- FG / BG coloring ----------------
+
+    def on_action_clear_style(self, event = None):
+        """Clear text formatting from selection and for new text"""
+        if self._current_note_panel and self._current_note_panel.view._edit_state.active:
+            edit_state = self._current_note_panel.view._edit_state
+            if edit_state.has_selection():
+                # Apply to selected text
+                if edit_state.clear_formatting_on_selection():
+                    # Save the changes
+                    rich_data = edit_state.rich_text.to_storage()
+                    self._current_note_panel.view.cache.set_edit_rich_text(edit_state.entry_id, rich_data)
+                    self._current_note_panel.view.invalidate_cache(edit_state.entry_id)
+                    self._current_note_panel.view._invalidate_edit_row_cache()
+                    self._current_note_panel.view._refresh_edit_row()
+                    self.SetStatusText(f"Cleared text style from selection")
+                else:
+                    self.SetStatusText("No text selected")
+            else:
+                # Set format for new text
+                formatting = {"color": None, "bg": None, "bold": False, "italic": False}
+                edit_state.set_format_state(**formatting)
+                self.SetStatusText(f"Text style cleared for new text")
+
+        self._restore_view_focus()
 
     def on_action_fg_color_changed(self, color):
         """Handle foreground color change from toolbar"""
@@ -315,7 +339,7 @@ class MainFrame(wx.Frame):
 
     # ---------------- Notebook create/open ----------------
 
-    def on_action_new(self, _evt):
+    def on_action_new(self, evt=None):
         with wx.DirDialog(self, "Choose parent directory (a subfolder will be created)") as dd:
             if dd.ShowModal() != wx.ID_OK:
                 return
@@ -336,7 +360,7 @@ class MainFrame(wx.Frame):
                 self.SetStatusText(f"Creating notebook at {target}...")
                 self.io.submit(ensure_notebook, target, name=name, callback=self._on_nb_ready)
 
-    def on_action_open(self, _evt):
+    def on_action_open(self, evt=None):
         with wx.DirDialog(self, "Open existing notebook (folder with notebook.json)") as dd:
             if dd.ShowModal() != wx.ID_OK:
                 return
@@ -377,9 +401,10 @@ class MainFrame(wx.Frame):
         # Auto-show the first root entry (create one if empty)
         roots = get_root_ids(self.current_notebook_path)
         if not roots:
-            rid = create_node(self.current_notebook_path, parent_id=None, title="Root")
+            root_content = [{"content": "Root"}]
+            rid = create_node(self.current_notebook_path, parent_id=None, content=root_content)
             # Seed the first child under root
-            _first_child = create_node(self.current_notebook_path, parent_id=rid, title="")
+            _first_child = create_node(self.current_notebook_path, parent_id=rid)
             roots = [rid]
 
         self._show_notebook(roots[0])
@@ -535,9 +560,90 @@ class MainFrame(wx.Frame):
         self._current_entry_id = root_entry_id
         self._current_note_panel = panel
 
+    # --------------- Add row ---------------
+
+    def on_action_show_all(self, event):
+        """Handle Show All toolbar button - expand current node and all its descendants"""
+        if not self._current_note_panel:
+            return
+
+        view = self._current_note_panel.view
+
+        # If we have a current selection, expand it and all its descendants
+        if view._rows and 0 <= view._sel < len(view._rows):
+            current_entry_id = view._rows[view._sel].entry_id
+            expanded_any = view.flat_tree.expand_descendants(current_entry_id)
+
+            if expanded_any:
+                self.SetStatusText("Expanded selection and all descendants")
+            else:
+                self.SetStatusText("Selection and descendants already expanded")
+        else:
+            # No selection - expand all top-level entries and their descendants
+            expanded_any = False
+            for row in view._rows:
+                if row.level == 0:  # Top-level entries
+                    if view.flat_tree.expand_descendants(row.entry_id):
+                        expanded_any = True
+
+            if expanded_any:
+                self.SetStatusText("Expanded all entries")
+            else:
+                self.SetStatusText("All entries already expanded")
+
+        self._restore_view_focus()
+
+    # --------------- Add row ---------------
+
+    def on_action_add_row(self, event=None):
+        """Handle Add Row toolbar button - shared by Enter key"""
+        if not self._current_note_panel:
+            return False
+
+        view = self._current_note_panel.view
+
+        # Handle both edit mode and navigation mode
+        if view._edit_state.active:
+            # Exit edit mode, save current content
+            current_entry_id = view._edit_state.entry_id
+            view.exit_edit_mode(save=True)
+            new_id = view.flat_tree.create_sibling_after(current_entry_id)
+        else:
+            # Navigation mode - handle empty notebook case
+            if len(view._rows) == 0:
+                from core.tree import get_root_ids, create_node
+                root_ids = get_root_ids(view.notebook_dir)
+                if root_ids:
+                    new_id = create_node(view.notebook_dir, parent_id=root_ids[0], title="")
+                    if new_id:
+                        view.rebuild()
+                        if view._rows:
+                            view.enter_edit_mode(0, 0)
+                        return True
+                return False
+
+            if not (0 <= view._sel < len(view._rows)):
+                return False
+            cur_id = view._rows[view._sel].entry_id
+            new_id = view.flat_tree.create_sibling_after(cur_id)
+
+        if new_id:
+            # Find and start editing the new node
+            for i, row in enumerate(view._rows):
+                if row.entry_id == new_id:
+                    view.enter_edit_mode(i, 0)
+                    from ui.scroll import soft_ensure_visible
+                    soft_ensure_visible(view, i)
+                    break
+            self._restore_view_focus()
+            return True
+
+        self._restore_view_focus()
+        return False
+
     # --------------- Image import handler ---------------
 
-    def on_action_add_images(self, evt):
+    def on_action_add_images(self, evt=None):
         """Handle add images action - open file dialog and import images"""
         from ui.file_dialogs import choose_image_files
 
@@ -572,10 +678,8 @@ class MainFrame(wx.Frame):
 
         for src in paths:
             if is_empty_notebook:
-                # Use FlatTree instead of create_node
-                new_id = self._current_note_panel.view.flat_tree.create_child_under(cur_id, title="")
+                new_id = self._current_note_panel.view.flat_tree.create_child_under(cur_id)
             else:
-                # Use FlatTree instead of add_sibling_after
                 new_id = self._current_note_panel.view.flat_tree.create_sibling_after(insertion_id)
 
             if new_id:
@@ -597,18 +701,19 @@ class MainFrame(wx.Frame):
             # Refresh view and select the last created node
             note.view.rebuild()
 
-            # Ensure we have rows after rebuild
-            if note.view._rows:
-                # Find and select the new entry
-                for i, row in enumerate(note.view._rows):
-                    if row.entry_id == last_new_id:
-                        note.view._change_selection(i)
-                        break
+            if last_new_id:
+                # Refresh view and select the last created node
+                note.view.rebuild()
 
-                note.select_entry(last_new_id)
-            else:
-                # If still no rows, something went wrong
-                wx.LogWarning(f"No rows after adding image, last_new_id: {last_new_id}")
+                # Select the newly created entry (handles finding the row automatically)
+                view = self._current_note_panel.view
+                if view._edit_state.active:
+                    view.exit_edit_mode(save=True)
+                if note.select_entry(last_new_id):
+                    self.SetStatusText(f"Added {len(paths)} image(s).")
+                else:
+                    wx.LogWarning(f"Could not select newly created entry: {last_new_id}")
+                    self.SetStatusText(f"Added {len(paths)} image(s), but selection failed.")
 
         self.SetStatusText(f"Added {len(paths)} image(s).")
 
@@ -651,9 +756,9 @@ class MainFrame(wx.Frame):
         # Restore focus to the view
         self._restore_view_focus()
 
-    # --------------- Row deletion ---------------
+    # --------------- Search deletion ---------------
 
-    def _on_search(self, query):
+    def on_action_search(self, query):
         """Handle search from toolbar."""
         if not self.current_notebook_path or not self._current_note_panel:
             wx.MessageBox("Open a notebook first", "Search", wx.OK | wx.ICON_INFORMATION)
@@ -661,7 +766,148 @@ class MainFrame(wx.Frame):
 
         # Show non-modal search dialog
         show_search_dialog(self, self.current_notebook_path, self._current_note_panel.view, query)
-    
+
+    # --------------- Indent / Outdent ---------------
+
+    def on_action_indent(self, event=None):
+        """Handle Indent Row toolbar button - shared by Tab key"""
+        if not self._current_note_panel:
+            return False
+
+        view = self._current_note_panel.view
+
+        if view._edit_state.active:
+            # Edit mode - save content, indent, restore edit state
+            current_entry_id = view._edit_state.entry_id
+            current_cursor_pos = view._edit_state.cursor_pos
+
+            # Save current content
+            if view._edit_state.rich_text:
+                rich_data = view._edit_state.rich_text.to_storage()
+                view.cache.set_edit_rich_text(current_entry_id, rich_data)
+                from core.tree import commit_entry_edit
+                commit_entry_edit(view.notebook_dir, current_entry_id, rich_data)
+
+            success = view.flat_tree.indent_entry(current_entry_id)
+
+            if success:
+                # Re-enter edit mode at same cursor position
+                for i, row in enumerate(view._rows):
+                    if row.entry_id == current_entry_id:
+                        view.enter_edit_mode(i, current_cursor_pos)
+                        view.select_entry(current_entry_id, ensure_visible=True)
+                        break
+        else:
+            # Navigation mode
+            if not (0 <= view._sel < len(view._rows)):
+                return False
+            cur_id = view._rows[view._sel].entry_id
+            success = view.flat_tree.indent_entry(cur_id)
+
+            if success:
+                view.select_entry(cur_id, ensure_visible=False)
+
+        self._restore_view_focus()
+        return success if 'success' in locals() else False
+
+    def on_action_outdent(self, event=None):
+        """Handle Outdent Row toolbar button - shared by Shift+Tab key"""
+        if not self._current_note_panel:
+            return False
+
+        view = self._current_note_panel.view
+
+        if view._edit_state.active:
+            # Edit mode - save content, outdent, restore edit state
+            current_entry_id = view._edit_state.entry_id
+            current_cursor_pos = view._edit_state.cursor_pos
+
+            # Save current content
+            if view._edit_state.rich_text:
+                rich_data = view._edit_state.rich_text.to_storage()
+                view.cache.set_edit_rich_text(current_entry_id, rich_data)
+                from core.tree import commit_entry_edit
+                commit_entry_edit(view.notebook_dir, current_entry_id, rich_data)
+
+            success = view.flat_tree.outdent_entry(current_entry_id)
+
+            if success:
+                # Re-enter edit mode at same cursor position
+                for i, row in enumerate(view._rows):
+                    if row.entry_id == current_entry_id:
+                        view.enter_edit_mode(i, current_cursor_pos)
+                        view.select_entry(current_entry_id, ensure_visible=True)
+                        break
+        else:
+            # Navigation mode - check level restriction
+            if not (0 <= view._sel < len(view._rows)):
+                return False
+            current_row = view._rows[view._sel]
+            if current_row.level == 0:
+                return False  # Can't outdent children of hidden root
+
+            cur_id = current_row.entry_id
+            success = view.flat_tree.outdent_entry(cur_id)
+
+            if success:
+                view.select_entry(cur_id, ensure_visible=False)
+
+        self._restore_view_focus()
+        return success if 'success' in locals() else False
+
+    # --------------- Lines to rows ---------------
+
+    def on_action_lines_to_rows(self, event=None):
+        """Split current row on newlines into separate sibling rows."""
+        if not self._current_note_panel:
+            self.SetStatusText("No notebook open")
+            return
+
+        view = self._current_note_panel.view
+
+        if not (0 <= view._sel < len(view._rows)):
+            return  # No selection - silent noop
+
+        current_row = view._rows[view._sel]
+        target_id = current_row.entry_id
+
+        entry = view._get(target_id)
+        rich_text_data = entry.get("text", [])
+
+        plain_text = ""
+        for run in rich_text_data:
+            plain_text += run.get("content", "")
+
+        # Better CRLF handling
+        lines = plain_text.splitlines()
+
+        if len(lines) <= 1:
+            return  # Silent noop
+
+        if view._edit_state.active:
+            view.exit_edit_mode(save=True)
+
+        try:
+            new_ids = view.flat_tree.create_siblings_batch(target_id, len(lines))
+
+            # NEW: write each line into the corresponding new entry via the cache
+            for new_id, line in zip(new_ids, lines):
+                e = view.cache.entry(new_id)         # load into cache (or fetch existing cached copy)
+                e["text"] = [{"content": line}]      # plain-text run
+                e["edit"] = ""                       # not in edit mode
+                view.cache.save_entry_data(e)        # persist via cache
+
+            view.flat_tree.delete_entry(target_id)
+
+            if new_ids:
+                view.select_entry(new_ids, ensure_visible=True)
+                self.SetStatusText(f"Split into {len(new_ids)} rows")
+
+        except Exception as e:
+            self.SetStatusText(f"Failed to split row: {e}")
+
+        self._restore_view_focus()
+
     # --------------- Help actions ---------------
 
     def show_about_dialog(self, event=None):
@@ -702,29 +948,20 @@ class MainFrame(wx.Frame):
             self._history_browser.Raise()
             return
 
-        try:
-            # Create and show non-modal dialog
-            self._history_browser = HistoryBrowserDialog(
-                self,
-                self.current_notebook_path,
-                self.version_manager
-            )
-            self._history_browser.Show()
+        # Create and show non-modal dialog
+        self._history_browser = HistoryBrowserDialog(
+            self,
+            self.current_notebook_path,
+            self.version_manager
+        )
+        self._history_browser.Show()
 
-            # Clean up reference when dialog closes
-            def on_dialog_close(evt):
-                self._history_browser = None
-                evt.Skip()
+        # Clean up reference when dialog closes
+        def on_dialog_close(evt):
+            self._history_browser = None
+            evt.Skip()
 
-            self._history_browser.Bind(wx.EVT_CLOSE, on_dialog_close)
-
-        except Exception as e:
-            wx.MessageBox(
-                f"Failed to open history browser:\n\n{str(e)}", 
-                "Version Control Error", 
-                wx.OK | wx.ICON_ERROR
-            )
-
+        self._history_browser.Bind(wx.EVT_CLOSE, on_dialog_close)
         self._restore_view_focus()
 
     def set_read_only_mode(self, read_only: bool):

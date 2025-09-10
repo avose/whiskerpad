@@ -102,6 +102,7 @@ class wpAboutFrame(wx.Frame):
         # OK button at bottom right
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_ok = wx.Button(self.main_panel, wx.ID_OK, "OK")
+        self.btn_ok.SetBitmap(wpIcons.Get("tick"))
         button_sizer.AddStretchSpacer()
         button_sizer.Add(self.btn_ok, 0, wx.ALL, 4)
         main_sizer.Add(button_sizer, 0, wx.EXPAND)
@@ -166,6 +167,7 @@ class wpDonateFrame(wx.Frame):
 
         # Add OK button to close.
         ok_btn = wx.Button(panel, label="OK")
+        ok_btn.SetBitmap(wpIcons.Get("tick"))
         ok_btn.Bind(wx.EVT_BUTTON, self.OnClose)
         vbox.AddStretchSpacer()
         vbox.Add(ok_btn, 0, wx.ALIGN_RIGHT, 4)

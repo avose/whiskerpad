@@ -90,8 +90,12 @@ def entry_dir(notebook_dir: str, entry_id: str) -> Path:
 def entry_json_path(notebook_dir: str, entry_id: str) -> Path:
     return entry_dir(notebook_dir, entry_id) / "entry.json"
 
-def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str = "",
-                insert_index: Optional[int] = None) -> str:
+def create_node(
+        notebook_dir: str,
+        parent_id: Optional[str] = None,
+        content: Optional[List[Dict[str, Any]]] = None,
+        insert_index: Optional[int] = None,
+) -> str:
     """
     Create a new node with rich text format.
     If parent_id is None, append to notebook.root_ids.
@@ -108,8 +112,8 @@ def create_node(notebook_dir: str, parent_id: Optional[str] = None, title: str =
     now = int(time.time())
 
     # Rich text format with single "text" field - start empty if no title given
-    if title:
-        text_content = [{"content": title}]
+    if content:
+        text_content = content
     else:
         text_content = [{"content": ""}]  # Empty but still valid rich text structure
 

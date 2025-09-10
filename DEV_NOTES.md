@@ -202,13 +202,23 @@ OUTSTANDING ISSUES / TODO
 5. Performance optimizations for very large notebooks
 6. User preferences and configuration UI
 
-DEBUGGING NOTES
-----------------
+STYLE / CODE / DEBUGGING NOTES
+------------------------------
+- We prefer code with bugs to fail early and often so issues can be found and fixed!
+- We DO NOT like excessive try / except / pass blocks as they can hide bugs!
+- We also DO NOT like guessing about object members with hasattr()!
+- If there is some uncertainty about what members an object has, ask, look into it!
 - All error handling now uses explicit exceptions rather than defensive programming
 - Log messages include source filenames automatically
 - Click any log entry to copy the message to clipboard for easy bug reporting
 
 This document reflects the current state of WhiskerPad development as of September 9, 2025.
+
+WORKING TOGETHER
+----------------
+- I will upload files in batches and let you know once we are done uploading.
+- Until then, just give a very brief summary of the files that I have uploaded.
+- We will always discuss changes in natural language before writing code / implementing.
 
 REPO LAYOUT
 -----------

@@ -28,7 +28,7 @@ from ui.constants import (
     DEFAULT_ROW_H,
     DEFAULT_BG_COLOR,
 )
-
+from ui.icons import wpIcons
 from ui.types import Row
 from ui.model import flatten_tree
 from ui.layout import measure_row_height
@@ -67,6 +67,7 @@ class GCView(wx.ScrolledWindow):
 
         self.notebook_dir = notebook_dir
         self.root_id = root_id
+        self.main_frame = wx.GetApp().GetTopWindow()
 
         # central cache
         self.cache = NotebookCache(notebook_dir, self)
@@ -138,6 +139,7 @@ class GCView(wx.ScrolledWindow):
         self.Bind(wx.EVT_MOTION, self._on_motion)
         self.Bind(wx.EVT_LEFT_DCLICK, self._on_left_dclick)
         self.Bind(wx.EVT_MOUSEWHEEL, self._on_mousewheel)
+        self.Bind(wx.EVT_RIGHT_DOWN, self._on_context_menu)
 
         # track last client width for cheap resize detection
         self._last_client_w = self.GetClientSize().width
@@ -172,9 +174,7 @@ class GCView(wx.ScrolledWindow):
         if getattr(self, '_read_only', False):
             return True
         try:
-            main_frame = wx.GetApp().GetTopWindow()
-            if hasattr(main_frame, 'is_read_only'):
-                return main_frame.is_read_only()
+            return self.main_frame.is_read_only()
         except:
             pass
         return False
@@ -323,6 +323,8 @@ class GCView(wx.ScrolledWindow):
 
         if entry_id:
             self.invalidate_cache(entry_id)
+            self._index.rebuild(self, self._rows)
+            self.SetVirtualSize((-1, self._index.content_height()))
 
         self.Refresh()
 
@@ -672,10 +674,8 @@ class GCView(wx.ScrolledWindow):
     def SetStatusText(self, text: str):
         """Set status text in main frame."""
         # Get the main frame and set status text
-        main_frame = wx.GetApp().GetTopWindow()
-        if hasattr(main_frame, 'SetStatusText'):
-            Log.debug(text, 0)
-            main_frame.SetStatusText(text)
+        Log.debug(text, 0)
+        self.main_frame.SetStatusText(text)
 
     # ------------ Clipboard operations ------------
 
@@ -1131,3 +1131,66 @@ class GCView(wx.ScrolledWindow):
         self._index.rebuild(self, self._rows)
         self.SetVirtualSize((-1, self._index.content_height()))
         self._refresh_changed_area(entry_id)
+
+    # ------------ Context menu ------------
+
+    @check_read_only
+    def _on_context_menu(self, evt):
+        """Show context menu with same actions as toolbar"""
+        main_frame = wx.GetApp().GetTopWindow()
+        if not main_frame:
+            return
+        # First perform the same action as a left click.
+        handle_left_down(self, evt)
+
+        menu = wx.Menu()
+
+        # Define menu items matching toolbar actions (excluding color pickers)
+        menu_items = [
+            (wx.NewIdRef(), "Add Image(s)", "image_add", "on_action_add_images"),
+            (wx.NewIdRef(), "Create Tab", "tab_add", "on_action_add_tab"),
+            (wx.NewIdRef(), "Show All", "sitemap", "on_action_show_all"),
+            (wx.NewIdRef(), "Lines to Bullets", "text_list_bullets", "on_action_lines_to_rows"),
+            (wx.NewIdRef(), "Add Row", "add", "on_action_add_row"),
+            (wx.NewIdRef(), "Delete", "delete", "on_action_delete"),
+        ]
+
+        # Build menu and collect IDs for context-sensitive enabling
+        menu_id_map = {}  # method_name -> menu_id
+
+        for item in menu_items:
+            if item is None:
+                menu.AppendSeparator()
+            else:
+                menu_id, label, icon_name, method_name = item
+
+                # Create menu item with icon
+                menu_item = wx.MenuItem(menu, menu_id, label)
+                icon = wpIcons.Get(icon_name)
+                if icon and icon.IsOk():
+                    menu_item.SetBitmap(icon)
+
+                menu.Append(menu_item)
+                menu_id_map[method_name] = menu_id
+
+                # Bind to MainFrame method
+                handler = getattr(main_frame, method_name)
+                self.Bind(wx.EVT_MENU, handler, id=menu_id)
+
+        # Context-sensitive enabling/disabling
+        self._update_context_menu_state(menu, menu_id_map)
+
+        # Show menu at cursor position
+        self.PopupMenu(menu)
+        menu.Destroy()
+
+    def _update_context_menu_state(self, menu, menu_id_map):
+        """Enable/disable menu items based on current state"""
+        # Disable specific actions based on state.
+        #has_selection = 0 <= self._sel < len(self._rows)
+        #is_image = has_selection and is_image_row(self, self._sel)
+        #in_edit_mode = self._edit_state.active
+        #has_cut_entry = self._cut_entry_id is not None
+        #for action in actions_subset:
+        #    if action in menu_id_map:
+        #        menu.Enable(menu_id_map[action], False)

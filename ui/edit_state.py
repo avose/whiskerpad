@@ -467,6 +467,16 @@ class EditState:
         start, end = selection_range
         return self.rich_text.to_plain_text()[start:end]
 
+    def clear_formatting_on_selection(self) -> bool:
+        """Clear color formatting from selected text, preserve links."""
+        if not self.has_selection() or not self.rich_text:
+            return False
+
+        start, end = self.get_selection_range()
+        formatting = {"color": None, "bg": None, "bold": False, "italic": False}
+        self._apply_formatting_to_range(start, end, **formatting)
+        return True
+
     def apply_color_to_selection(self, color: str):
         """Apply color to selected text."""
         if not self.has_selection() or not self.rich_text:

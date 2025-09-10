@@ -241,29 +241,19 @@ class TabsPanel(wx.Panel):
         tab_idx = self.context_tab_idx
         tab_name = self.tabs[tab_idx].display_text
 
-        dlg = wx.MessageDialog(
-            self,
-            f"Remove tab '{tab_name}'?",
-            "Confirm Remove Tab",
-            wx.YES_NO | wx.ICON_QUESTION
-        )
+        tab_name = self.tabs[tab_idx].display_text
+        Log.debug(f"_on_remove_tab(), {tab_idx=}, {tab_name=}", 1)
+        self.tabs.pop(tab_idx)
 
-        if dlg.ShowModal() == wx.ID_YES:
-            tab_name = self.tabs[tab_idx].display_text
-            Log.debug(f"_on_remove_tab(), {tab_idx=}, {tab_name=}", 1)
-            self.tabs.pop(tab_idx)
+        # Adjust selection if needed
+        if self.selected_tab_idx >= len(self.tabs):
+            self.selected_tab_idx = len(self.tabs) - 1
+        elif self.selected_tab_idx >= tab_idx:
+            self.selected_tab_idx -= 1
 
-            # Adjust selection if needed
-            if self.selected_tab_idx >= len(self.tabs):
-                self.selected_tab_idx = len(self.tabs) - 1
-            elif self.selected_tab_idx >= tab_idx:
-                self.selected_tab_idx -= 1
-
-            self.Refresh()
-            if self.on_tab_changed:
-                self.on_tab_changed()
-
-        dlg.Destroy()
+        self.Refresh()
+        if self.on_tab_changed:
+            self.on_tab_changed()
 
     @check_read_only
     def _on_set_tab_color(self, evt):
