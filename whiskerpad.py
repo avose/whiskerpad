@@ -11,8 +11,18 @@ from whiskerpad.app import main
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WhiskerPad notebook application")
-    parser.add_argument("--verbosity", type=int, default=0, 
-                        help="Set verbosity level (0=quiet, 1=normal, 2=verbose, 3+=debug)")
+    parser.add_argument(
+        "--verbosity",
+        type=int, default=0, 
+        help="Set verbosity level (0=quiet, 1=normal, 2=verbose, 3+=debug)"
+    )
+    parser.add_argument(
+        "--stdexp",
+        action="store_true",
+        help="Use standard exception handling to stdout / stderr."
+    )
     args = parser.parse_args()
     
-    sys.exit(main(verbosity=args.verbosity))
+    sys.exit(
+        main(verbosity=args.verbosity, stdexp=args.stdexp)
+    )

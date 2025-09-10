@@ -30,15 +30,16 @@ def on_exception(exc_type, exc_value, exc_traceback):
             # Print to console
             print(error_message)
 
-# Install the exception handler
-sys.excepthook = on_exception
-
 if tuple(getattr(wx, 'VERSION', (0,0,0))[:3]) < (4, 2, 3):
     raise RuntimeError(f"WhiskerPad requires wxPython ≥ 4.2.3; found {wx.__version__}")
 
 from whiskerpad.ui.main_frame import MainFrame
 
-def main(verbosity=0):
+def main(verbosity: int = 0, stdexp: bool = False):
+    # Install the exception handler
+    if not stdexp:
+        sys.excepthook = on_exception
+
     app = wx.App(False)
     
     frame = MainFrame(verbosity=verbosity)

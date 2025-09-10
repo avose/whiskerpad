@@ -18,6 +18,7 @@ from core.tree import (
 )
 from core.version_manager import VersionManager
 from ui.toolbar import Toolbar
+from ui.file_dialogs import choose_image_files
 from ui.statusbar import StatusBar
 from ui.image_import import import_image_into_entry
 from ui.note_panel import NotePanel
@@ -61,7 +62,7 @@ class MainFrame(wx.Frame):
 
     # ---------------- FG / BG coloring ----------------
 
-    def _on_fg_color_changed(self, color):
+    def on_action_fg_color_changed(self, color):
         """Handle foreground color change from toolbar"""
         # Convert wx.Colour to hex string
         hex_color = f"#{color.Red():02x}{color.Green():02x}{color.Blue():02x}"
@@ -90,7 +91,7 @@ class MainFrame(wx.Frame):
 
         self._restore_view_focus()
 
-    def _on_bg_color_changed(self, color):
+    def on_action_bg_color_changed(self, color):
         """Handle background color change from toolbar"""
         # Convert wx.Colour to hex string
         hex_color = f"#{color.Red():02x}{color.Green():02x}{color.Blue():02x}"
@@ -121,19 +122,19 @@ class MainFrame(wx.Frame):
 
     # ---------------- Clipboard interaction ----------------
 
-    def _on_copy(self, evt=None):
+    def on_action_copy(self, evt=None):
         """Handle copy button click."""
         if self._current_note_panel:
             self._current_note_panel.view.copy()
         self._restore_view_focus()
 
-    def _on_paste(self, evt=None):
+    def on_action_paste(self, evt=None):
         """Handle paste button click."""
         if self._current_note_panel:
             self._current_note_panel.view.paste()
         self._restore_view_focus()
 
-    def _on_cut(self, evt=None):
+    def on_action_cut(self, evt=None):
         """Handle cut button click."""
         if self._current_note_panel:
             self._current_note_panel.view.cut()
@@ -141,43 +142,43 @@ class MainFrame(wx.Frame):
 
     # ---------------- Image operations ----------------
 
-    def _on_zoom_in(self, evt=None):
+    def on_action_zoom_in(self, evt=None):
         """Handle zoom in button click."""
         if self._current_note_panel:
             self._current_note_panel.view.zoom_image_in()
         self._restore_view_focus()
 
-    def _on_zoom_out(self, evt=None):
+    def on_action_zoom_out(self, evt=None):
         """Handle zoom out button click."""
         if self._current_note_panel:
             self._current_note_panel.view.zoom_image_out()
         self._restore_view_focus()
 
-    def _on_zoom_reset(self, evt=None):
+    def on_action_zoom_reset(self, evt=None):
         """Handle zoom reset button click."""
         if self._current_note_panel:
             self._current_note_panel.view.zoom_image_reset()
         self._restore_view_focus()
 
-    def _on_rotate_clockwise(self, evt=None):
+    def on_action_rotate_clockwise(self, evt=None):
         """Handle rotate clockwise button click."""
         if self._current_note_panel:
             self._current_note_panel.view.rotate_image_clockwise()
         self._restore_view_focus()
 
-    def _on_rotate_anticlockwise(self, evt=None):
+    def on_action_rotate_anticlockwise(self, evt=None):
         """Handle rotate anticlockwise button click."""
         if self._current_note_panel:
             self._current_note_panel.view.rotate_image_anticlockwise()
         self._restore_view_focus()
 
-    def _on_flip_vertical(self, evt=None):
+    def on_action_flip_vertical(self, evt=None):
         """Handle flip vertical button click."""
         if self._current_note_panel:
             self._current_note_panel.view.flip_image_vertical()
         self._restore_view_focus()
 
-    def _on_flip_horizontal(self, evt=None):
+    def on_action_flip_horizontal(self, evt=None):
         """Handle flip horizontal button click."""
         if self._current_note_panel:
             self._current_note_panel.view.flip_image_horizontal()
@@ -232,8 +233,8 @@ class MainFrame(wx.Frame):
 
         m_file.AppendSeparator()
         m_quit = m_file.Append(wx.ID_EXIT, "E&xit")
-        self.Bind(wx.EVT_MENU, self.on_new_notebook, m_new)
-        self.Bind(wx.EVT_MENU, self.on_open_notebook, m_open)
+        self.Bind(wx.EVT_MENU, self.on_action_new, m_new)
+        self.Bind(wx.EVT_MENU, self.on_action_open, m_open)
         self.Bind(wx.EVT_MENU, self.on_quit, m_quit)
         mb.Append(m_file, "&File")
 
@@ -275,26 +276,7 @@ class MainFrame(wx.Frame):
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Top toolbar - spans full width
-        self._toolbar = Toolbar(
-            root,  # Direct child of root
-            on_open=self.on_open_notebook,
-            on_add_images=self._on_add_images,
-            on_add_tab=self._on_add_tab,
-            on_copy=self._on_copy,
-            on_paste=self._on_paste,
-            on_cut=self._on_cut,
-            on_delete=self._on_delete,
-            on_zoom_in=self._on_zoom_in,
-            on_zoom_out=self._on_zoom_out,
-            on_zoom_reset=self._on_zoom_reset,
-            on_rotate_clockwise=self._on_rotate_clockwise,
-            on_rotate_anticlockwise=self._on_rotate_anticlockwise,
-            on_flip_vertical=self._on_flip_vertical,
-            on_flip_horizontal=self._on_flip_horizontal,
-            on_fg_color=self._on_fg_color_changed,
-            on_bg_color=self._on_bg_color_changed,
-            on_search=self._on_search,
-        )
+        self._toolbar = Toolbar(root)
         main_sizer.Add(self._toolbar, 0, wx.EXPAND)
 
         # Horizontal sizer for content area + tabs
@@ -333,7 +315,7 @@ class MainFrame(wx.Frame):
 
     # ---------------- Notebook create/open ----------------
 
-    def on_new_notebook(self, _evt):
+    def on_action_new(self, _evt):
         with wx.DirDialog(self, "Choose parent directory (a subfolder will be created)") as dd:
             if dd.ShowModal() != wx.ID_OK:
                 return
@@ -354,7 +336,7 @@ class MainFrame(wx.Frame):
                 self.SetStatusText(f"Creating notebook at {target}...")
                 self.io.submit(ensure_notebook, target, name=name, callback=self._on_nb_ready)
 
-    def on_open_notebook(self, _evt):
+    def on_action_open(self, _evt):
         with wx.DirDialog(self, "Open existing notebook (folder with notebook.json)") as dd:
             if dd.ShowModal() != wx.ID_OK:
                 return
@@ -467,7 +449,7 @@ class MainFrame(wx.Frame):
 
         self._restore_view_focus()
 
-    def _on_add_tab(self, evt=None):
+    def on_action_add_tab(self, evt=None):
         """Create a new tab from the currently selected row."""
         if not self._current_note_panel:
             self.SetStatusText("No notebook open")
@@ -544,7 +526,7 @@ class MainFrame(wx.Frame):
         self._content_sizer.Clear(delete_windows=True)
 
         panel = NotePanel(self._content_panel, self.current_notebook_path, root_entry_id,
-                         on_image_drop=self._on_add_images)
+                         on_image_drop=self.on_action_add_images)
 
         self._content_sizer.Add(panel, 1, wx.EXPAND | wx.ALL, 0)
         self.info = None
@@ -555,14 +537,22 @@ class MainFrame(wx.Frame):
 
     # --------------- Image import handler ---------------
 
-    def _on_add_images(self, paths: list[str]) -> None:
-        """Import image files and create new entries."""
+    def on_action_add_images(self, evt):
+        """Handle add images action - open file dialog and import images"""
+        from ui.file_dialogs import choose_image_files
+
+        paths = choose_image_files(self, multiple=True)
+        if not paths:
+            return
+
+        # Now call your existing logic with the paths
         if not self.current_notebook_path or not self._current_note_panel:
             wx.LogWarning("Open a notebook first.")
             return
 
         notebook_dir = self.current_notebook_path
         note = self._current_note_panel
+
         cur_id = note.current_selection_id()
 
         # Check if we're in an empty notebook (cur_id is root)
@@ -574,7 +564,7 @@ class MainFrame(wx.Frame):
             if not root_ids:
                 wx.LogWarning("No root found.")
                 return
-            cur_id = root_ids[0]  # Use the hidden root as parent
+            cur_id = root_ids[0] # Use the hidden root as parent
             is_empty_notebook = True
 
         insertion_id = cur_id
@@ -600,7 +590,7 @@ class MainFrame(wx.Frame):
                 save_entry(notebook_dir, entry)
 
                 if not is_empty_notebook:
-                    insertion_id = new_id  # Only update insertion_id for sibling mode
+                    insertion_id = new_id # Only update insertion_id for sibling mode
                 last_new_id = new_id
 
         if last_new_id:
@@ -614,6 +604,7 @@ class MainFrame(wx.Frame):
                     if row.entry_id == last_new_id:
                         note.view._change_selection(i)
                         break
+
                 note.select_entry(last_new_id)
             else:
                 # If still no rows, something went wrong
@@ -623,7 +614,7 @@ class MainFrame(wx.Frame):
 
     # --------------- Row deletion ---------------
 
-    def _on_delete(self, evt=None):
+    def on_action_delete(self, evt=None):
         """Handle delete button click - delete the currently selected row."""
         if not self._current_note_panel:
             self.SetStatusText("No notebook open")
