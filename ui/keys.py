@@ -5,7 +5,6 @@ from __future__ import annotations
 import wx
 from core.log import Log
 from ui.scroll import visible_range
-from ui.select import select_row, select_entry_id
 from ui.row import has_children
 from ui.notebook_text import rich_text_from_entry
 from ui.edit_state import find_word_boundaries
@@ -105,15 +104,6 @@ def _move_cursor_down_line(edit_state, view):
 
 def _handle_single_line_arrow_navigation(view, key_code) -> bool:
     """Handle up/down arrows for single-line entries - move between rows."""
-    current_row = view._rows[view._sel]
-    current_layout = view.cache.layout(current_row.entry_id) or {}
-
-    if current_layout.get("is_img"):
-        if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
-            return _move_to_previous_row(view)
-        elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
-            return _move_to_next_row(view)
-
     if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         return _move_to_previous_row(view)
     elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
@@ -130,7 +120,7 @@ def _move_to_previous_row(view) -> bool:
     """Move selection to previous row, entering edit mode only if not an image row."""
     if view._sel > 0:
         view.exit_edit_mode(save=True)
-        select_row(view, view._sel - 1)
+        view.select_row(view._sel - 1)
 
         prev_row = view._rows[view._sel]
         layout = view.cache.layout(prev_row.entry_id) or {}
@@ -151,7 +141,7 @@ def _move_to_next_row(view) -> bool:
     """Move selection to next row, entering edit mode only if not an image row."""
     if view._sel < len(view._rows) - 1:
         view.exit_edit_mode(save=True)
-        select_row(view, view._sel + 1)
+        view.select_row(view._sel + 1)
 
         next_row = view._rows[view._sel]
         layout = view.cache.layout(next_row.entry_id) or {}
@@ -436,7 +426,16 @@ def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
     if code == wx.WXK_TAB:
         return _handle_nav_tab_keys(view, evt)
 
-    if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP, wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+    if code in (
+            wx.WXK_UP,
+            wx.WXK_NUMPAD_UP,
+            wx.WXK_DOWN,
+            wx.WXK_NUMPAD_DOWN,
+            wx.WXK_LEFT,
+            wx.WXK_NUMPAD_LEFT,
+            wx.WXK_RIGHT,
+            wx.WXK_NUMPAD_RIGHT,
+    ):
         return _handle_nav_arrow_keys(view, evt)
 
     if code in (wx.WXK_PAGEUP, wx.WXK_PAGEDOWN):
@@ -479,55 +478,90 @@ def _handle_nav_tab_keys(view, evt) -> bool:
 
 def _handle_nav_arrow_keys(view, evt) -> bool:
     """Handle up/down arrow navigation."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
     sel = view._sel
     n = len(view._rows)
 
-    if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
+    # Pan image when shift key is down.
+    current_row = view._rows[view._sel]
+    current_layout = view.cache.layout(current_row.entry_id) or {}
+    if evt.ShiftDown() and current_layout.get("is_img"):
+        if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
+            pan_y = view._img_pan_y - 10
+            view.set_image_scale_pan(pan_y=pan_y)
+            return True
+        elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+            pan_y = view._img_pan_y + 10
+            view.set_image_scale_pan(pan_y=pan_y)
+            return True
+        elif key_code in (wx.WXK_LEFT, wx.WXK_NUMPAD_LEFT):
+            pan_x = view._img_pan_x - 10
+            view.set_image_scale_pan(pan_x=pan_x)
+            return True
+        elif key_code in (wx.WXK_RIGHT, wx.WXK_NUMPAD_RIGHT):
+            pan_x = view._img_pan_x + 10
+            view.set_image_scale_pan(pan_x=pan_x)
+            return True
+
+    # Scale image when control key is down.
+    current_row = view._rows[view._sel]
+    current_layout = view.cache.layout(current_row.entry_id) or {}
+    if evt.ControlDown() and current_layout.get("is_img"):
+        if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
+            scale = view._img_scale * 1.5
+            view.set_image_scale_pan(scale=scale)
+            return True
+        elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+            scale = view._img_scale * (1.0 / 1.5)
+            view.set_image_scale_pan(scale=scale)
+            return True
+
+    # Move row selection.
+    if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         if sel > 0:
-            select_row(view, sel - 1)
+            view.select_row(sel - 1)
         return True
-    elif code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+    elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         if sel < n - 1:
-            select_row(view, sel + 1)
+            view.select_row(sel + 1)
         return True
 
     return False
 
 def _handle_nav_page_keys(view, evt) -> bool:
     """Handle PageUp/PageDown navigation."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
     sel = view._sel
     n = len(view._rows)
 
-    if code == wx.WXK_PAGEUP:
+    if key_code == wx.WXK_PAGEUP:
         first, _ = visible_range(view)
         target = first - 1 if sel == first and first > 0 else first
         if 0 <= target < n and target != sel:
-            select_row(view, target)
+            view.select_row(target)
         return True
-    elif code == wx.WXK_PAGEDOWN:
+    elif key_code == wx.WXK_PAGEDOWN:
         _, last = visible_range(view)
         target = sel + 1 if sel == last and sel < n - 1 else last
         if 0 <= target < n and target != sel:
-            select_row(view, target)
+            view.select_row(target)
         return True
 
     return False
 
 def _handle_nav_home_end_keys(view, evt) -> bool:
     """Handle Home/End navigation."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
     sel = view._sel
     n = len(view._rows)
 
-    if code == wx.WXK_HOME:
+    if key_code == wx.WXK_HOME:
         if sel != 0 and n > 0:
-            select_row(view, 0)
+            view.select_row(0)
         return True
-    elif code == wx.WXK_END:
+    elif key_code == wx.WXK_END:
         if n > 0 and sel != n - 1:
-            select_row(view, n - 1)
+            view.select_row(n - 1)
         return True
 
     return False
@@ -551,8 +585,8 @@ def _handle_nav_enter_key(view) -> bool:
 
 def _handle_nav_delete_keys(view, evt) -> bool:
     """Handle Delete/Backspace keys to delete current row."""
-    code = evt.GetKeyCode()
-    if code not in (wx.WXK_DELETE, wx.WXK_BACK):
+    key_code = evt.GetKeyCode()
+    if key_code not in (wx.WXK_DELETE, wx.WXK_BACK):
         return False
     view.main_frame.on_action_delete()
     return True

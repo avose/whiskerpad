@@ -181,18 +181,84 @@ class RowPainter:
         x: int,
         y: int,
     ):
+        # Draw the image with scale and pan modifications.
+        self._draw_image_token_scale_and_pan(
+            gc,
+            row,
+            layout,
+            x,
+            y,
+            self.view._img_scale,
+            self.view._img_pan_x,
+            self.view._img_pan_y,
+            True
+        )
+
+    def _draw_image_token_scale_and_pan(
+        self,
+        gc: wx.GraphicsContext,
+        row: Row,
+        layout: dict,
+        x: int,
+        y: int,
+        scale: float = 1.0,
+        pan_x: float = 0.0,
+        pan_y: float = 0.0,
+        outline: bool = True,
+    ):
         fname = layout.get("img_file")
         sw = int(layout.get("img_sw") or 0)
         sh = int(layout.get("img_sh") or 0)
+
         if fname and sw > 0 and sh > 0:
             try:
                 bmp_dir = entry_dir(self.view.notebook_dir, row.entry_id)
                 bmp, _, _ = load_thumb_bitmap(bmp_dir, fname)
+
+                # Save the current graphics state
+                gc.PushState()
+
+                # Set clipping region to original image bounds
+                # This ensures only the original viewport area is visible
+                gc.Clip(x, y, sw, sh)
+
+                # Apply pan offset
+                if pan_x != 0.0 or pan_y != 0.0:
+                    gc.Translate(pan_x, pan_y)
+
+                # Apply scale transformation
+                if scale != 1.0:
+                    # Scale around the center of the image area
+                    center_x = x + sw / 2
+                    center_y = y + sh / 2
+                    gc.Translate(center_x, center_y)
+                    gc.Scale(scale, scale)
+                    gc.Translate(-center_x, -center_y)
+
+                # Draw the bitmap - it will be clipped to the original bounds
                 gc.DrawBitmap(bmp, x, y, sw, sh)
+
+                # Draw black outline in transformed coordinates.
+                if outline:
+                    gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+                    gc.SetBrush(wx.TRANSPARENT_BRUSH)
+                    gc.DrawRectangle(x, y, sw, sh)
+
+                # Restore the previous graphics state
+                gc.PopState()
+
+                # Draw black outline in original coordinates.
+                if outline:
+                    gc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1))
+                    gc.SetBrush(wx.TRANSPARENT_BRUSH)
+                    gc.DrawRectangle(x, y, sw, sh)
+
                 return
+
             except Exception:
                 pass  # fall through to token text
 
+        # Fallback text rendering (unchanged)
         gc.SetFont(self.view._font, wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT))
         gc.DrawText(f'{{{{img "{fname or "MISSING"}"}}}}', x, y)
 

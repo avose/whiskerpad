@@ -33,7 +33,6 @@ from ui.types import Row
 from ui.model import flatten_tree
 from ui.layout import measure_row_height
 from ui.row import RowPainter, RowMetrics
-from ui.select import select_entry_id
 from ui.mouse import (
     handle_left_down,
     handle_left_up,
@@ -130,6 +129,11 @@ class GCView(wx.ScrolledWindow):
         # CREATE FLATTREE INSTANCE - This is the key integration point
         self.flat_tree = FlatTree(self)
 
+        # Image scale / pan
+        self._img_scale = 1.0
+        self._img_pan_x = 0.0
+        self._img_pan_y = 0.0
+
         # event bindings
         self.Bind(wx.EVT_PAINT, self._on_paint)
         self.Bind(wx.EVT_SIZE, self._on_size)
@@ -201,8 +205,31 @@ class GCView(wx.ScrolledWindow):
             new_idx = -1
         if self._sel == new_idx:
             return
+        # Set the new selection.
         self._sel = new_idx
-        self.Refresh(False)  # repaint to update highlight
+        # Clear any saved image scale / pan state.
+        self._img_scale = 1.0
+        self._img_pan_x = 0.0
+        self._img_pan_y = 0.0
+        # Repaint to update highlight
+        self.Refresh(False)
+
+    def select_row(self, idx: int, ensure_visible: bool = True, refresh: bool = True) -> bool:
+        """Select a row by index."""
+        idx = min(max(idx, 0), len(self._rows)-1)
+
+        self._change_selection(idx)
+        if ensure_visible:
+            soft_ensure_visible(self, idx)
+
+        return True
+    
+    def select_entry(self, entry_id: str, ensure_visible: bool = True) -> bool:
+        """Select a row by entry id."""
+        for i, r in enumerate(self._rows):
+            if r.entry_id == entry_id:
+                return self.select_row(i, ensure_visible=ensure_visible, refresh=True)
+        return False
 
     # ------------------------------------------------------------------ #
     # rebuilding / flattening
@@ -654,9 +681,6 @@ class GCView(wx.ScrolledWindow):
         # No valid selection
         return None
 
-    def select_entry(self, entry_id: str, ensure_visible: bool = True) -> bool:
-        return select_entry_id(self, entry_id, ensure_visible)
-
     # dummy stubs for NotePanel
     def edit_entry(self, _eid: str) -> bool:
         return False
@@ -963,6 +987,17 @@ class GCView(wx.ScrolledWindow):
             self._bookmark_source_id = None
             self._refresh_changed_area(old_id)
 
+
+    # ------------ Image scale / pan (view only, not data) ------------
+
+    def set_image_scale_pan(self, scale: float = None, pan_x: float = None, pan_y: float = None):
+        if scale is not None:
+            self._img_scale = scale
+        if pan_x is not None:
+            self._img_pan_x = pan_x
+        if pan_y is not None:
+            self._img_pan_y = pan_y
+        self.Refresh(False)
 
     # ------------ Image zoom operations ------------
 

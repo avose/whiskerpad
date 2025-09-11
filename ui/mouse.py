@@ -7,7 +7,6 @@ from core.log import Log
 from ui.row import caret_hit, item_rect, has_children
 from ui.row_utils import date_gutter_hit, caret_hit, item_rect, has_children
 from ui.scroll import soft_ensure_visible
-from ui.select import select_row
 from ui.notebook_text import rich_text_from_entry
 from ui.edit_state import find_word_boundaries
 
@@ -120,49 +119,33 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
     pos = evt.GetPosition()
     idx = row_at_window_y(view, pos.y)
 
-    # ---------- click in empty space ----------
+    # ---------- Empty space click ----------
     if idx < 0 or idx >= len(view._rows):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
-
-        old_sel = view._sel
-        view._sel = -1
-        if old_sel >= 0:
-            view.Refresh()
-
+        view.select_row(-1)
         return True
 
     rect = item_rect(view, idx)
     row = view._rows[idx]
 
-    # ---------- date gutter click → just select row ----------
+    # ---------- Date gutter click, select row ----------
     if date_gutter_hit(view, row, rect, pos):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
-
-        old_sel = view._sel
-        view._sel = idx
-        if old_sel != idx:
-            view.Refresh()
-
+        view.select_row(idx)
         view.SetFocus()
         return True
 
-    # ---------- caret gutter click ----------
+    # ---------- Caret gutter click ----------
     if caret_hit(view, row, rect, pos):
         if has_children(view, row):
             # Has children - toggle collapse/expand as usual
             if view._edit_state.active:
                 view.exit_edit_mode(save=True)
-
             # Use FlatTree instead of direct toggle_collapsed
             view.flat_tree.toggle_collapse(row.entry_id)
-
-            old_sel = view._sel
-            view._sel = idx
-            if old_sel != idx:
-                view.Refresh()
-
+            view.select_row(idx)
             view.SetFocus()
             return True
 
@@ -170,38 +153,27 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
             # No children - just select the row, don't start editing
             if view._edit_state.active:
                 view.exit_edit_mode(save=True)
-
-            old_sel = view._sel
-            view._sel = idx
-            if old_sel != idx:
-                view.Refresh()
-
+            view.select_row(idx)
             view.SetFocus()
             return True
 
-    # ---------- check if this is an image-token row ----------
+    # ---------- Image-token row click ----------
     layout = view.cache.layout(row.entry_id) or {}
     if layout.get("is_img"):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
-
-        old_sel = view._sel
-        view._sel = idx
-        if old_sel != idx:
-            view.Refresh()
-
+        view.select_row(idx)
         view.SetFocus()
         return True
 
-    # ---------- text click → check for links FIRST, then edit mode ----------
+    # ---------- Text click, check for links FIRST, then edit mode ----------
     char_pos = char_pos_from_click(view, idx, pos)
 
     # ALWAYS check for link clicks first, regardless of edit state
     if _handle_link_click(view, idx, char_pos):
         return True
 
-    old_sel = view._sel
-    view._sel = idx
+    view.select_row(idx)
 
     if view._edit_state.active and view._edit_state.row_idx == idx:
         view.set_cursor_position(char_pos)
@@ -212,9 +184,6 @@ def handle_left_down(view, evt: wx.MouseEvent) -> bool:
         view._is_dragging = False
 
     else:
-        if old_sel != idx and old_sel >= 0:
-            view.Refresh() # clear old highlight
-
         view.enter_edit_mode(idx, char_pos)
 
         # Prepare for potential drag
@@ -234,7 +203,7 @@ def handle_left_dclick(view, evt: wx.MouseEvent) -> bool:
     row = view._rows[idx]
     rect = item_rect(view, idx)
 
-    # ---------- caret gutter double-click → toggle collapse ----------
+    # ---------- Caret gutter double-click, toggle collapse ----------
     if caret_hit(view, row, rect, pos) and has_children(view, row):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
@@ -244,20 +213,16 @@ def handle_left_dclick(view, evt: wx.MouseEvent) -> bool:
 
         return True
 
-    # ---------- date gutter double-click → just select row ----------
+    # ---------- Date gutter double-click, just select row ----------
     if date_gutter_hit(view, row, rect, pos):
         if view._edit_state.active:
             view.exit_edit_mode(save=True)
 
-        old_sel = view._sel
-        view._sel = idx
-        if old_sel != idx:
-            view.Refresh()
-
+        view.select_row(idx)
         view.SetFocus()
         return True
 
-    # ---------- text area double-click → word selection ----------
+    # ---------- Text area double-click, word selection ----------
     # Check if this is a text row (not image)
     layout = view.cache.layout(row.entry_id) or {}
     if layout.get("is_img"):
