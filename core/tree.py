@@ -111,7 +111,7 @@ def create_node(
 
     now = int(time.time())
 
-    # Rich text format with single "text" field - start empty if no title given
+    # Rich text format with single "text" field - start empty if no content given
     if content:
         text_content = content
     else:

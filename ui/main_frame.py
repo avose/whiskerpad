@@ -614,7 +614,7 @@ class MainFrame(wx.Frame):
                 from core.tree import get_root_ids, create_node
                 root_ids = get_root_ids(view.notebook_dir)
                 if root_ids:
-                    new_id = create_node(view.notebook_dir, parent_id=root_ids[0], title="")
+                    new_id = create_node(view.notebook_dir, parent_id=root_ids[0])
                     if new_id:
                         view.rebuild()
                         if view._rows:

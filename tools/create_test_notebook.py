@@ -76,7 +76,7 @@ def save_entry(nb_dir, entry):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(entry, f, indent=2)
 
-def create_node(nb_dir, parent_id, title):
+def create_node(nb_dir, parent_id, text):
     eid = uuid4().hex[:12]
     node_dir = Path(nb_dir) / 'entries' / eid[:2] / eid
     node_dir.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,7 @@ def create_node(nb_dir, parent_id, title):
     entry = {
         'id': eid,
         'parent_id': parent_id,
-        'text': [{'content': title}],
+        'text': [{'content': text}],
         'edit': '',
         'items': [],
         'collapsed': False,
