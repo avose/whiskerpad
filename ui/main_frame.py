@@ -871,7 +871,7 @@ class MainFrame(wx.Frame):
         current_row = view._rows[view._sel]
         target_id = current_row.entry_id
 
-        entry = view._get(target_id)
+        entry = view.cache.entry(target_id)
         rich_text_data = entry.get("text", [])
 
         plain_text = ""

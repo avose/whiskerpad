@@ -22,7 +22,7 @@ __all__ = [
 
 def has_children(view, row: Row) -> bool:
     """Check if a row has child entries."""
-    entry = view._get(row.entry_id)
+    entry = view.cache.entry(row.entry_id)
     return any(
         item.get("type") == "child"
         for item in entry.get("items", [])

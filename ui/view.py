@@ -180,13 +180,6 @@ class GCView(wx.ScrolledWindow):
         return False
 
     # ------------------------------------------------------------------ #
-    # thin helper: keep legacy _get(...) usage alive
-    # ------------------------------------------------------------------ #
-
-    def _get(self, eid: str) -> Dict[str, Any]:
-        return self.cache.entry(eid)
-
-    # ------------------------------------------------------------------ #
     # cache invalidation wrappers
     # ------------------------------------------------------------------ #
 
@@ -281,7 +274,7 @@ class GCView(wx.ScrolledWindow):
             return
 
         row = self._rows[row_idx]
-        entry = self._get(row.entry_id)
+        entry = self.cache.entry(row.entry_id)
         Log.debug(f"enter_edit_mode({row_idx=}, {cursor_pos=}), {row.entry_id=}", 10)
         rich_text = rich_text_from_entry(entry)
 
@@ -306,7 +299,7 @@ class GCView(wx.ScrolledWindow):
             import json
 
             # Load the stored content from disk
-            entry = self._get(entry_id)
+            entry = self.cache.entry(entry_id)
             stored_text = entry.get("text", [])
 
             # Get the edited content
@@ -345,7 +338,7 @@ class GCView(wx.ScrolledWindow):
     def _get_subtree_entry_ids(self, root_id: str) -> set[str]:
         result = {root_id}
         try:
-            entry = self._get(root_id)
+            entry = self.cache.entry(root_id)
             for item in entry.get("items", []):
                 if isinstance(item, dict) and item.get("type") == "child":
                     cid = item.get("id")
@@ -725,7 +718,7 @@ class GCView(wx.ScrolledWindow):
                     self._refresh_changed_area(self._bookmark_source_id)
 
                     # Get entry title for status
-                    entry = self._get(self._bookmark_source_id)
+                    entry = self.cache.entry(self._bookmark_source_id)
                     title = entry.get('text', [{}])[0].get('content', 'Untitled')[:30]
                     self.SetStatusText(f"Row marked as bookmark source: {title}")
                 else:
@@ -841,7 +834,7 @@ class GCView(wx.ScrolledWindow):
 
         try:
             # Get the source entry to create default link text
-            source_entry = self._get(self._bookmark_source_id)
+            source_entry = self.cache.entry(self._bookmark_source_id)
 
             # Get default text from the entry (first 30 chars of content)
             text_content = source_entry.get('text', [{}])

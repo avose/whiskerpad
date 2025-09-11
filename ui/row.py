@@ -57,7 +57,7 @@ class RowPainter:
 
         # Normal persistent state
         try:
-            entry = self.view._get(entry_id)
+            entry = self.view.cache.entry(entry_id)
             return entry.get("collapsed", False)
         except:
             return False
@@ -132,7 +132,7 @@ class RowPainter:
             gc.DrawRectangle(outline_x, outline_y, outline_w, outline_h)
 
         # date gutter (bg + YY-MM-DD + outline)
-        entry = self.view._get(row.entry_id)
+        entry = self.view.cache.entry(row.entry_id)
         self._draw_date_gutter(gc, rect, entry, selected)
 
         # caret glyph
@@ -221,7 +221,7 @@ class RowPainter:
 
     def _draw_plain_text_fallback(self, gc, row, x, y, selected):
         """Draw plain text when no rich text layout is available."""
-        plain = rich_text_from_entry(self.view._get(row.entry_id)).to_plain_text()
+        plain = rich_text_from_entry(self.view.cache.entry(row.entry_id)).to_plain_text()
         if plain.strip():
             color_key = wx.SYS_COLOUR_HIGHLIGHTTEXT if selected else wx.SYS_COLOUR_WINDOWTEXT
             gc.SetFont(self.view._font, wx.SystemSettings.GetColour(color_key))
@@ -281,7 +281,7 @@ class RowPainter:
 
             # Check if the target still exists
             try:
-                self.view._get(target_id)
+                self.view.cache.entry(target_id)
                 # Target exists - use blue for working links
                 return wx.Colour("#0000ff")
             except Exception:

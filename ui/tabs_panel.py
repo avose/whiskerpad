@@ -297,7 +297,7 @@ class TabsPanel(wx.Panel):
             if (hasattr(main_frame, '_current_note_panel') and
                 main_frame._current_note_panel):
                 # Use the view's cache to check if entry exists
-                main_frame._current_note_panel.view._get(entry_id)
+                main_frame._current_note_panel.view.cache.entry(entry_id)
                 return True
         except Exception:
             pass

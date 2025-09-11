@@ -42,7 +42,7 @@ def paint_rows(view, gc: wx.GraphicsContext, first_idx: int, y0: int, max_h: int
         h = measure_row_height(view, r)
         rect = wx.Rect(0, y, w, h)
         ensure_wrap_cache(view, r)
-        e = view._get(r.entry_id)
+        e = view.cache.entry(r.entry_id)
         
         # Always pass selection state - the row painter will handle cut vs selection priority
         is_selected = (i == view._sel)

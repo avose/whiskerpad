@@ -56,7 +56,7 @@ class FlatTree:
         # Load current collapsed states from all visible entries
         for row in self.view._rows:
             try:
-                entry = self.view._get(row.entry_id)
+                entry = self.view.cache.entry(row.entry_id)
                 is_collapsed = entry.get_collapsed(False)
             except Exception:
                 # Skip entries that can't be loaded, don't break the entire operation
@@ -76,7 +76,7 @@ class FlatTree:
         else:
             # Normal mode - check persistent state
             try:
-                entry = self.view._get(entry_id)
+                entry = self.view.cache.entry(entry_id)
                 return entry.get("collapsed", False)
             except:
                 return False
@@ -357,7 +357,7 @@ class FlatTree:
         """
         # 1. Check if target entry exists
         try:
-            target_entry = self.view._get(entry_id)
+            target_entry = self.view.cache.entry(entry_id)
         except:
             return False
 

@@ -69,7 +69,7 @@ def _get_text_run_at_char_pos(view, row_idx: int, char_pos: int):
         return None
 
     row = view._rows[row_idx]
-    entry = view._get(row.entry_id)
+    entry = view.cache.entry(row.entry_id)
     rich_text = rich_text_from_entry(entry)
 
     if not rich_text or char_pos < 0:

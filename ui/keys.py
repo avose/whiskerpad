@@ -138,7 +138,7 @@ def _move_to_previous_row(view) -> bool:
         if layout.get("is_img"):
             return True
 
-        prev_entry = view._get(prev_row.entry_id)
+        prev_entry = view.cache.entry(prev_row.entry_id)
         prev_rich_text = rich_text_from_entry(prev_entry)
         cursor_pos = prev_rich_text.char_count()
 

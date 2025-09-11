@@ -21,7 +21,7 @@ def _is_collapsed(notebook_dir: str, entry_id: str, view=None) -> bool:
     # Normal persistent check
     try:
         if view:
-            entry = view._get(entry_id)
+            entry = view.cache.entry(entry_id)
         else:
             entry = load_entry(notebook_dir, entry_id)
         return entry.get("collapsed", False)
@@ -39,7 +39,7 @@ def _gather_children(notebook_dir: str, parent_id: str, level: int, out: List[Ro
     # Add all child entries
     try:
         if view:
-            entry = view._get(parent_id)
+            entry = view.cache.entry(parent_id)
         else:
             entry = load_entry(notebook_dir, parent_id)
             
@@ -63,7 +63,7 @@ def flatten_tree(notebook_dir: str, root_id: str, view=None) -> List[Row]:
     try:
         # Load the root entry but don't add it to the display
         if view:
-            root_entry = view._get(root_id)
+            root_entry = view.cache.entry(root_id)
         else:
             root_entry = load_entry(notebook_dir, root_id)
 
