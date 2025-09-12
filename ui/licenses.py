@@ -778,9 +778,6 @@ class wpLicenseFrame(wx.Frame):
         box_main = wx.BoxSizer(wx.VERTICAL)
         # Panel to hold text at the top of the about frame.
         box_top = wx.BoxSizer(wx.VERTICAL)
-        self.st_title = wx.StaticText(self, wx.ID_ANY, "WhiskerPad Licenses:")
-        self.st_title.SetFont(wx.Font(wx.FontInfo(11).FaceName("Monospace").Bold()))
-        box_top.Add(self.st_title, 0, wx.ALL, 10)
         self.image_list = wx.ImageList(16, 16)
         self.image_list.Add(wpIcons.Get('script_key'))
         self.notebook = wx.Notebook(self)
