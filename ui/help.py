@@ -22,7 +22,7 @@ class BackgroundPanel(wx.Panel):
         # CRITICAL: Must set background style before using AutoBufferedPaintDC
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
 
-        self.background_bmp = wx.Bitmap(image_path, wx.BITMAP_TYPE_PNG)
+        self.background_bmp = wx.Bitmap(image_path, wx.BITMAP_TYPE_JPEG)
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_ERASE_BACKGROUND, lambda evt: None)  # Prevent flicker
 
@@ -137,6 +137,8 @@ class wpDonateFrame(wx.Frame):
         self.icon.CopyFromBitmap(wpIcons.Get('money_dollar'))
         self.SetIcon(self.icon)
         panel = wx.Panel(self)
+        col = panel.GetBackgroundColour()
+        bgcolor = col.Get()
         vbox = wx.BoxSizer(wx.VERTICAL)
 
         # Load and show the PNG image.
@@ -153,10 +155,13 @@ class wpDonateFrame(wx.Frame):
         btc_label = wx.StaticText(panel, label="Bitcoin Address:")
         addr_sizer = wx.BoxSizer(wx.HORIZONTAL)
         addr_style = wx.TE_READONLY | wx.TE_CENTER | wx.BORDER_NONE
-        addr_text = wx.TextCtrl(panel, value=btc_addr, style=addr_style)
+        addr_text = wx.TextCtrl(panel, style=addr_style)
+        addr_text.SetBackgroundColour(bgcolor)
+        addr_text.SetDefaultStyle(wx.TextAttr(colText=wx.BLACK, colBack=bgcolor))
         font = addr_text.GetFont()
         font.SetPointSize(9)
         addr_text.SetFont(font)
+        addr_text.ChangeValue(btc_addr)
         copy_icon = wpIcons.Get('page_white_copy')
         copy_btn = wx.BitmapButton(panel, bitmap=copy_icon, style=wx.BORDER_NONE)
         copy_btn.Bind(wx.EVT_BUTTON, lambda evt: self.CopyToClipboard(btc_addr))
