@@ -155,7 +155,15 @@ class RowPainter:
         content_x = x0 + self.m.GUTTER_W
 
         if layout.get("is_img"):
-            self._draw_image_token(gc, row, layout, content_x, y_text_top)
+            if selected:
+                scale = self.view._img_scale
+                pan_x = self.view._img_pan_x
+                pan_y = self.view._img_pan_y
+            else:
+                scale = 1.0
+                pan_x = 0.0
+                pan_y = 0.0
+            self._draw_image_token(gc, row, layout, content_x, y_text_top, scale, pan_x, pan_y)
         else:
             self._draw_rich_text(gc, row, layout, content_x, y_text_top, selected)
 
@@ -174,27 +182,6 @@ class RowPainter:
     # ------------------------------------------------------------------ #
 
     def _draw_image_token(
-        self,
-        gc: wx.GraphicsContext,
-        row: Row,
-        layout: dict,
-        x: int,
-        y: int,
-    ):
-        # Draw the image with scale and pan modifications.
-        self._draw_image_token_scale_and_pan(
-            gc,
-            row,
-            layout,
-            x,
-            y,
-            self.view._img_scale,
-            self.view._img_pan_x,
-            self.view._img_pan_y,
-            True
-        )
-
-    def _draw_image_token_scale_and_pan(
         self,
         gc: wx.GraphicsContext,
         row: Row,

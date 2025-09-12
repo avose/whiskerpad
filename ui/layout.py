@@ -73,7 +73,7 @@ def _store_image_layout(
             sw, sh = tw, th
 
         #!!avose: Hack to allow images to be larger than width.
-        #sw, sh = tw, th
+        sw, sh = tw, th
 
         layout = {
             "is_img": True,
