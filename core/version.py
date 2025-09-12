@@ -3,10 +3,10 @@
 Copyright 2025 Aaron Vose (avose@aaronvose.net)
 Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
 
-This file holds the current version of the OG-Code application.
+This file holds the current version of WhiskerPad.
 '''
 ################################################################################################
 
-wpVersion = "0.1.1"
+wpVersion = "0.2.1"
 
 ################################################################################################

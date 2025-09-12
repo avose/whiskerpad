@@ -1,4 +1,8 @@
 # ui/pdf_import.py
+'''
+Copyright 2025 Aaron Vose (avose@aaronvose.net)
+Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
+'''
 
 from __future__ import annotations
 
@@ -202,8 +206,9 @@ class ImportPDFDialog(wx.Dialog):
         self._create_layout()
         self._bind_events()
         
-        # Center dialog (removed SetMinSize to allow natural fitting)
+        # Center dialog
         self.Center()
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
         
     def _create_controls(self):
         """Create all dialog controls."""

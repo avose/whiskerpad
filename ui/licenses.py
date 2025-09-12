@@ -764,7 +764,6 @@ class wpLicenseCC(wx.Window):
         box_main.Add(self.tc_license, 0, wx.ALIGN_CENTER)
         self.SetSizerAndFit(box_main)
         self.Show(True)
-        return
 
 ################################################################################################
 class wpLicenseFrame(wx.Frame):
@@ -800,15 +799,13 @@ class wpLicenseFrame(wx.Frame):
         # Set main box as frame sizer.
         self.SetSizerAndFit(box_main)
         self.Show(True)
-        return
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
 
     def OnOk(self, event):
         self.OnClose()
-        return
 
     def OnClose(self, event=None):
         self.Parent.license_frame = None
         self.Destroy()
-        return
 
 ################################################################################################

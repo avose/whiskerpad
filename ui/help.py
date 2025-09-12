@@ -121,6 +121,7 @@ class wpAboutFrame(wx.Frame):
         
         self.Center()
         self.Show(True)
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
 
     def OnClose(self, event=None):
         self.Parent.about_frame = None
@@ -177,6 +178,7 @@ class wpDonateFrame(wx.Frame):
         self.SetSize((300, 340))
         self.Centre()
         self.Show()
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
 
     def CopyToClipboard(self, text):
         # Copy BTC address to clipboard.

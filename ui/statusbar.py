@@ -33,7 +33,6 @@ class LogList(wx.VListBox):
         self.ScrollRows(self.log.count())
         self.Bind(wx.EVT_LEFT_UP, self._on_item_clicked)
         self.Show(True)
-        return
 
     def LineWrapText(self, initial_text):
         if initial_text is None or len(initial_text) == 0:
@@ -56,13 +55,14 @@ class LogList(wx.VListBox):
     def OnMeasureItem(self, index):
         timestamp, text = self.log.get(index)
         text, rows = self.LineWrapText(text)
-        return  rows * self.char_h
+        return rows * self.char_h
 
     def OnDrawItem(self, dc, rect, index):
         timestamp, text = self.log.get(index)
         text, rows = self.LineWrapText(self.log.get(index)[1])
         dc.Clear()
         dc.SetFont(self.font)
+
         # Draw background and borders.
         if self.IsSelected(index):
             brush = wx.Brush((64,0,64))
@@ -78,19 +78,21 @@ class LogList(wx.VListBox):
         offset = self.LINE_NUM_W + self.DATE_W - 0.5
         dc.DrawLine(rect[0] + int(offset*self.char_w), rect[1],
                     rect[0] + int(offset*self.char_w), rect[1]+rect[3])
+
         # Draw log line number and date.
         dc.SetTextForeground((255,255,0))
         dc.DrawText("%d"%index, rect[0], rect[1])
         dc.SetTextForeground((255,0,255))
         offset = self.LINE_NUM_W
         dc.DrawText(timestamp, rect[0] + offset*self.char_w, rect[1])
+
         # Draw log entry text.
         dc.SetTextForeground((128,192,128))
         offset = self.LINE_NUM_W + self.DATE_W
         dc.DrawText(text, rect[0] + offset*self.char_w, rect[1])
+
         # Update to catch new log entries.
         self.SetItemCount(self.log.count())
-        return
 
     def OnDrawBackground(self, dc, rect, index):
         dc.Clear()
@@ -99,9 +101,9 @@ class LogList(wx.VListBox):
         brush = wx.Brush((0,0,0))
         dc.SetBrush(brush)
         dc.DrawRectangle(rect[0], rect[1], rect[2], rect[3])
+
         # Update to catch new log entries.
         self.SetItemCount(self.log.count())
-        return
 
     def OnDrawSeparator(self, dc, rect, index):
         return
@@ -144,14 +146,12 @@ class StatusBarPopup(wx.PopupTransientWindow):
         box_main.Add(self.log_list, 1, wx.EXPAND)
         self.SetSizerAndFit(box_main)
         self.Show(True)
-        return
 
     def ProcessLeftDown(self, event):
         return wx.PopupTransientWindow.ProcessLeftDown(self, event)
 
     def OnDismiss(self):
         self.Parent.popup = None
-        return
 
 ################################################################################################
 class StatusBar(wx.StatusBar):
@@ -163,7 +163,6 @@ class StatusBar(wx.StatusBar):
         
         Log.add("Create StatusBar")
         self.popup = None
-        return
 
     def OnRightDown(self, event):
         """Handle right-click to show context menu with log options."""

@@ -1,4 +1,8 @@
 # ui/history_browser.py
+'''
+Copyright 2025 Aaron Vose (avose@aaronvose.net)
+Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
+'''
 
 from __future__ import annotations
 
@@ -74,6 +78,7 @@ class HistoryBrowserDialog(wx.Dialog):
         self._init_ui()
         self._bind_events()
         self.CenterOnParent()
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
 
         # Load history and enter read-only mode
         self._load_commit_history()

@@ -1,3 +1,7 @@
+'''
+Copyright 2025 Aaron Vose (avose@aaronvose.net)
+Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
+'''
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -144,6 +148,8 @@ class SearchDialog(wx.Dialog):
         # Timer for polling worker results
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._poll_results)
+
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
     
     def _create_controls(self):
         """Create dialog controls."""

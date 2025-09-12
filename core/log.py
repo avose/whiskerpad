@@ -25,12 +25,10 @@ class LogManager():
             now = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
             LogManager.__log = [(now, "Begin WhiskerPad Log")]
         self.verbosity = verbosity
-        return
 
     def add(self, text: str):
         now = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
         LogManager.__log.append((now, text))
-        return
 
     def debug(self, text: str, level: int = 0):
         if self.verbosity >= level:
@@ -46,7 +44,6 @@ class LogManager():
             # Format: [filename] message (removed debug level)
             formatted_msg = f"[{filename}] {text}"
             self.add(formatted_msg)
-        return
 
     def get(self, index: int = None):
         if index is not None:
@@ -58,7 +55,6 @@ class LogManager():
 
     def set_verbosity(self, verbosity: int = 0):
         self.verbosity = verbosity
-        return
 
     def clear(self):
         """Clear all log entries."""
@@ -66,7 +62,6 @@ class LogManager():
             LogManager.__log.clear()
             now = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
             LogManager.__log.append((now, "Log cleared"))
-        return
 
     def write_to_file(self, filepath: str):
         """Write all log entries to a file."""

@@ -1,3 +1,7 @@
+# storage.py
+'''
+Copyright 2025 Aaron Vose (avose@aaronvose.net)
+'''
 from __future__ import annotations
 
 import json, os, time

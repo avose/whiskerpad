@@ -1,3 +1,7 @@
+'''
+Copyright 2025 Aaron Vose (avose@aaronvose.net)
+Licensed under the LGPL v2.1; see the file 'LICENSE' for details.
+'''
 import os
 import wx
 from pathlib import Path
@@ -59,6 +63,8 @@ class MainFrame(wx.Frame):
         self.SetStatusText("Ready.")
         self._build_body()
         self.Bind(wx.EVT_CLOSE, self.Close)
+
+        self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))
 
     # ---------------- FG / BG coloring ----------------
 
