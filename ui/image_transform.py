@@ -13,7 +13,7 @@ import wx
 __all__ = [
     # Zoom operations (moved from image_zoom.py)
     "get_current_thumbnail_max_size",
-    "calculate_zoom_in_size", 
+    "calculate_zoom_in_size",
     "calculate_zoom_out_size",
     "calculate_reset_size",
     "clamp_thumbnail_size",
@@ -22,7 +22,7 @@ __all__ = [
     # Transform operations
     "flip_thumbnail_vertical",
     "flip_thumbnail_horizontal",
-    "rotate_thumbnail_clockwise", 
+    "rotate_thumbnail_clockwise",
     "rotate_thumbnail_anticlockwise",
 ]
 
@@ -49,10 +49,10 @@ def get_current_thumbnail_max_size(layout: dict) -> Optional[int]:
     """Extract the larger dimension from layout cache as current max size."""
     img_sw = layout.get("img_sw", 0)
     img_sh = layout.get("img_sh", 0)
-    
+
     if img_sw <= 0 or img_sh <= 0:
         return None
-        
+
     return max(img_sw, img_sh)
 
 
@@ -122,41 +122,41 @@ def rotate_thumbnail_anticlockwise(thumbnail_path: str) -> bool:
 def _apply_thumbnail_transform(thumbnail_path: str, transform_func) -> bool:
     """Apply a transformation function to thumbnail and save back to disk."""
     _ensure_wx_app()
-    
+
     path = Path(thumbnail_path)
     if not path.exists():
         return False
-    
+
     # Load thumbnail
     img = wx.Image(str(path))
     if not img.IsOk():
         return False
-    
+
     # Apply transformation
     transformed_img = transform_func(img)
     if not transformed_img.IsOk():
         return False
-    
+
     # Save via atomic replace (same pattern as image_utils.py)
     tmp_path = path.with_name(f".{path.name}.tmp")
-    
+
     try:
         # Save as PNG (thumbnail format change)
         if not transformed_img.SaveFile(str(tmp_path), wx.BITMAP_TYPE_PNG):
             return False
-        
+
         # Atomic replace
         os.replace(tmp_path, path)
-        
+
         # fsync directory
         fd = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(fd)
         finally:
             os.close(fd)
-        
+
         return True
-        
+
     finally:
         # Cleanup temp file if it exists
         if tmp_path.exists():

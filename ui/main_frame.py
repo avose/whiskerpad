@@ -322,7 +322,7 @@ class MainFrame(wx.Frame):
 
         # Right side - tabs panel
         self.tabs_panel = TabsPanel(
-            root, 
+            root,
             on_tab_click=self._on_tab_selected,
             on_tab_changed=self._save_tabs_to_notebook,
         )
@@ -392,8 +392,8 @@ class MainFrame(wx.Frame):
         except Exception as e:
             wx.MessageBox(
                 f"Failed to initialize version control:\n\n{str(e)}\n\n"
-                f"The notebook will work normally but history features won't be available.", 
-                "Version Control Warning", 
+                f"The notebook will work normally but history features won't be available.",
+                "Version Control Warning",
                 wx.OK | wx.ICON_WARNING
             )
 
@@ -924,14 +924,14 @@ class MainFrame(wx.Frame):
             self.about_frame.Raise()
 
     def show_license_dialog(self, event=None):
-        """Show the License dialog.""" 
+        """Show the License dialog."""
         if not hasattr(self, 'license_frame') or not self.license_frame:
             self.license_frame = wpLicenseFrame(self)
         else:
             self.license_frame.Raise()
 
     def show_donate_dialog(self, event=None):
-        """Show the Donate dialog.""" 
+        """Show the Donate dialog."""
         if not hasattr(self, 'donate_frame') or not self.donate_frame:
             self.donate_frame = wpDonateFrame(self)
         else:
@@ -943,8 +943,8 @@ class MainFrame(wx.Frame):
         """Open the history browser dialog for the current notebook."""
         if not self.current_notebook_path:
             wx.MessageBox(
-                "Open a notebook first to view history.", 
-                "No Notebook Open", 
+                "Open a notebook first to view history.",
+                "No Notebook Open",
                 wx.OK | wx.ICON_INFORMATION
             )
             return
@@ -986,7 +986,7 @@ class MainFrame(wx.Frame):
             self.open_notebook_menu_item.Enable(False)
         else:
             self.SetStatusText("Ready")
-            # Re-enable editing controls  
+            # Re-enable editing controls
             if self._toolbar:
                 self._toolbar.Enable(True)
             self.checkpoint_menu_item.Enable(True)
@@ -1030,15 +1030,15 @@ class MainFrame(wx.Frame):
         """Create a manual checkpoint with user-provided message."""
         if not self.current_notebook_path:
             wx.MessageBox(
-                "Open a notebook first to create a checkpoint.", 
-                "No Notebook Open", 
+                "Open a notebook first to create a checkpoint.",
+                "No Notebook Open",
                 wx.OK | wx.ICON_INFORMATION
             )
             return
 
         # Get checkpoint message from user
         with wx.TextEntryDialog(
-            self, 
+            self,
             "Enter a description for this checkpoint:",
             "Create Checkpoint",
             "Manual checkpoint"
@@ -1062,8 +1062,8 @@ class MainFrame(wx.Frame):
             # Handle "no changes" case gracefully
             if "No changes to commit" in str(e):
                 wx.MessageBox(
-                    "No changes to save.\n\nAll your work is already saved.", 
-                    "No Changes", 
+                    "No changes to save.\n\nAll your work is already saved.",
+                    "No Changes",
                     wx.OK | wx.ICON_INFORMATION
                 )
                 self.SetStatusText("No changes to save")

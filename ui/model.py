@@ -12,7 +12,7 @@ from ui.types import Row
 def _is_collapsed(notebook_dir: str, entry_id: str, view=None) -> bool:
     """
     Check if entry is collapsed, respecting read-only transient state.
-    
+
     In read-only mode: Check transient state first, fall back to persistent
     In normal mode: Check persistent state only
     """
@@ -21,7 +21,7 @@ def _is_collapsed(notebook_dir: str, entry_id: str, view=None) -> bool:
         if entry_id in view.flat_tree._transient_collapsed:
             return view.flat_tree._transient_collapsed[entry_id]
         # Fall through to persistent check if not in transient state
-    
+
     # Normal persistent check
     try:
         if view:
@@ -46,7 +46,7 @@ def _gather_children(notebook_dir: str, parent_id: str, level: int, out: List[Ro
             entry = view.cache.entry(parent_id)
         else:
             entry = load_entry(notebook_dir, parent_id)
-            
+
         for item in entry.get("items", []):
             if item.get("type") == "child" and isinstance(item.get("id"), str):
                 _gather_children(notebook_dir, item["id"], level + 1, out, view)
@@ -56,7 +56,7 @@ def _gather_children(notebook_dir: str, parent_id: str, level: int, out: List[Ro
 def flatten_tree(notebook_dir: str, root_id: str, view=None) -> List[Row]:
     """
     Flatten a hierarchical tree structure into a linear list of rows, excluding the root.
-    
+
     Args:
         notebook_dir: Path to notebook directory
         root_id: ID of root entry
@@ -83,7 +83,7 @@ def flatten_tree(notebook_dir: str, root_id: str, view=None) -> List[Row]:
 def update_tree_incremental(notebook_dir: str, rows: List[Row], changed_entry_id: str, view=None) -> List[Row]:
     """
     Update flattened tree incrementally when one node's collapse state changes.
-    
+
     Args:
         notebook_dir: Path to notebook directory
         rows: Current list of rows
@@ -119,11 +119,11 @@ def update_tree_incremental(notebook_dir: str, rows: List[Row], changed_entry_id
     if not is_collapsed:
         new_subtree = []
         _gather_children(notebook_dir, changed_entry_id, target_level, new_subtree, view)
-        
+
         # Remove the root since it's already in rows_before
         if new_subtree and new_subtree[0].entry_id == changed_entry_id:
             new_subtree = new_subtree[1:]
-        
+
         return rows_before + new_subtree + rows_after
     else:
         # If collapsed, just combine before and after

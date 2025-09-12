@@ -94,7 +94,7 @@ class RowPainter:
         gc.DrawRectangle(rect.x, rect.y, rect.width, rect.height)
 
         # Check if this row is cut (should always show red outline)
-        is_cut_row = (hasattr(self.view, '_cut_entry_id') and 
+        is_cut_row = (hasattr(self.view, '_cut_entry_id') and
                       self.view._cut_entry_id == row.entry_id)
 
         # Draw cut outline (red) if row is cut, regardless of selection
@@ -457,7 +457,7 @@ class RowPainter:
             gc.DrawText(ds, dx, dy)
 
         # Check if this row is cut (always show red gutter if cut)
-        is_cut_row = (hasattr(self.view, '_cut_entry_id') and 
+        is_cut_row = (hasattr(self.view, '_cut_entry_id') and
                       self.view._cut_entry_id == entry.get("id"))
 
         # Check if this row is bookmark source

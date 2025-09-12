@@ -62,7 +62,7 @@ class TextRun:
                 self.color == other.color and
                 self.bg == other.bg and
                 self.link_target == other.link_target)  # Add this line
-    
+
     def is_link(self) -> bool:
         """Check if this text run is a link."""
         return self.link_target is not None
@@ -144,9 +144,9 @@ class RichText:
         # Fix runs that start with newlines by merging them with previous run
         fixed = []
         for i, run in enumerate(merged):
-            if (i > 0 and 
-                run.content.startswith('\n') and 
-                fixed and 
+            if (i > 0 and
+                run.content.startswith('\n') and
+                fixed and
                 fixed[-1].same_format(run)):
                 # Merge this run with the previous one
                 fixed[-1].content += run.content
@@ -178,8 +178,8 @@ class RichText:
 
                 if formatting.same_format(run):
                     # Same formatting - just insert text
-                    run.content = (run.content[:pos_in_run] + 
-                                  text + 
+                    run.content = (run.content[:pos_in_run] +
+                                  text +
                                   run.content[pos_in_run:])
                 else:
                     # Different formatting - split the run

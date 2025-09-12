@@ -46,8 +46,8 @@ def main(verbosity: int = 0, stdexp: bool = False):
         sys.excepthook = on_exception
 
     app = wx.App(False)
-    
+
     frame = MainFrame(verbosity=verbosity)
     frame.Show()
-    
+
     return app.MainLoop()

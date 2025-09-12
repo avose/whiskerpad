@@ -36,7 +36,7 @@ class Toolbar(wx.Panel):
 
     def _create_controls(self):
         """Create all toolbar controls using data-driven approach"""
-        
+
         # Define toolbar structure as list of (ID, tooltip, icon_name, method_name) or None for separator
         self.tools = [
             (wx.ID_OPEN, "Open Notebook", "book_open", "on_action_open"),
@@ -67,7 +67,7 @@ class Toolbar(wx.Panel):
         # Create buttons and separators from tools list
         self.buttons = {}
         self.separators = []
-        
+
         for item in self.tools:
             if item is None:
                 # Create separator
@@ -85,15 +85,15 @@ class Toolbar(wx.Panel):
     def _create_button(self, btn_id: int, tooltip: str, icon_name: str, method_name: str) -> wx.BitmapButton:
         """Create a standard toolbar button"""
         bmp = wpIcons.Get(icon_name)
-        btn = wx.BitmapButton(self, id=btn_id, bitmap=bmp, 
+        btn = wx.BitmapButton(self, id=btn_id, bitmap=bmp,
                              style=wx.BU_EXACTFIT | wx.NO_BORDER)
         btn.SetToolTip(wx.ToolTip(tooltip))
         btn.SetCanFocus(False)  # Prevent button from stealing focus
-        
+
         # Bind to parent method
         handler = getattr(self.main_frame, method_name)
         btn.Bind(wx.EVT_BUTTON, handler)
-        
+
         return btn
 
     def _create_special_controls(self):
@@ -101,7 +101,7 @@ class Toolbar(wx.Panel):
         # Create clear formatting button
         clear_icon = wpIcons.Get("style_delete")
         self.clear_format_btn = wx.BitmapButton(
-            self, 
+            self,
             bitmap=clear_icon,
             style=wx.BU_EXACTFIT | wx.NO_BORDER
         )
@@ -112,16 +112,16 @@ class Toolbar(wx.Panel):
 
         # Foreground color section
         self.fg_section = self._create_fg_color_section()
-        
-        # Background color section  
+
+        # Background color section
         self.bg_section = self._create_bg_color_section()
-        
+
         # Search control
         self.search_ctrl = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
         self.search_ctrl.SetMinSize(wx.Size(175, 25))
         self.search_ctrl.ShowCancelButton(True)
         self.search_ctrl.SetToolTip(wx.ToolTip("Search Notebook"))
-        
+
         # Bind search events
         self.search_ctrl.Bind(wx.EVT_SEARCHCTRL_SEARCH_BTN, self._on_search_triggered)
         self.search_ctrl.Bind(wx.EVT_TEXT_ENTER, self._on_search_triggered)
@@ -129,12 +129,12 @@ class Toolbar(wx.Panel):
     def _create_fg_color_section(self):
         """Create foreground color picker with icon label"""
         section_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
+
         # Style icon for foreground color
         style_icon = wpIcons.Get("style")
         fg_icon = wx.StaticBitmap(self, bitmap=style_icon)
         fg_icon.SetToolTip(wx.ToolTip("Text Color"))
-        
+
         # Color picker
         self.fg_color_picker = wx.ColourPickerCtrl(
             self,
@@ -145,21 +145,21 @@ class Toolbar(wx.Panel):
         self.fg_color_picker.SetToolTip(wx.ToolTip("Text Color"))
         self.fg_color_picker.Bind(wx.EVT_KEY_DOWN, self._on_color_picker_key)
         self.fg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_fg_color_changed)
-        
+
         section_sizer.Add(fg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.fg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-        
+
         return section_sizer
 
     def _create_bg_color_section(self):
         """Create background color picker with icon label"""
         section_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
+
         # Paintbrush icon for background color
         paintbrush_icon = wpIcons.Get("paintbrush")
         bg_icon = wx.StaticBitmap(self, bitmap=paintbrush_icon)
         bg_icon.SetToolTip(wx.ToolTip("Highlight Color"))
-        
+
         # Color picker
         self.bg_color_picker = wx.ColourPickerCtrl(
             self,
@@ -170,21 +170,21 @@ class Toolbar(wx.Panel):
         self.bg_color_picker.SetToolTip(wx.ToolTip("Highlight Color"))
         self.bg_color_picker.Bind(wx.EVT_KEY_DOWN, self._on_color_picker_key)
         self.bg_color_picker.Bind(wx.EVT_COLOURPICKER_CHANGED, self._on_bg_color_changed)
-        
+
         section_sizer.Add(bg_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         section_sizer.Add(self.bg_color_picker, 0, wx.ALIGN_CENTER_VERTICAL)
-        
+
         return section_sizer
 
     def _setup_layout(self):
         """Arrange all controls in the toolbar layout"""
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer.AddSpacer(2)
-        
+
         # Add buttons and separators in order
         separator_idx = 0
         button_idx = 0
-        
+
         for item in self.tools:
             if item is None:
                 # Add separator

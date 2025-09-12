@@ -17,7 +17,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WhiskerPad notebook application")
     parser.add_argument(
         "--verbosity",
-        type=int, default=0, 
+        type=int, default=0,
         help="Set verbosity level (0=quiet, 1=normal, 2=verbose, 3+=debug)"
     )
     parser.add_argument(
@@ -26,7 +26,7 @@ if __name__ == "__main__":
         help="Use standard exception handling to stdout / stderr."
     )
     args = parser.parse_args()
-    
+
     sys.exit(
         main(verbosity=args.verbosity, stdexp=args.stdexp)
     )

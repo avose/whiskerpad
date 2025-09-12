@@ -157,10 +157,10 @@ class StatusBarPopup(wx.PopupTransientWindow):
 class StatusBar(wx.StatusBar):
     def __init__(self, parent):
         super(StatusBar, self).__init__(parent)
-        
+
         # Remove all left-click handlers
         self.Bind(wx.EVT_RIGHT_DOWN, self.OnRightDown)
-        
+
         Log.add("Create StatusBar")
         self.popup = None
 
@@ -168,20 +168,20 @@ class StatusBar(wx.StatusBar):
         """Handle right-click to show context menu with log options."""
         # Create popup menu
         menu = wx.Menu()
-        
+
         item_show_log = menu.Append(wx.ID_ANY, "Show Log")
         menu.AppendSeparator()
         item_save = menu.Append(wx.ID_SAVE, "Save Log to File...")
         item_copy = menu.Append(wx.ID_COPY, "Copy Log to Clipboard")
         menu.AppendSeparator()
         item_clear = menu.Append(wx.ID_CLEAR, "Clear Log")
-        
+
         # Bind menu events
         self.Bind(wx.EVT_MENU, self.OnShowLog, item_show_log)
         self.Bind(wx.EVT_MENU, self.OnSaveLogToFile, item_save)
         self.Bind(wx.EVT_MENU, self.OnCopyLogToClipboard, item_copy)
         self.Bind(wx.EVT_MENU, self.OnClearLog, item_clear)
-        
+
         # Show the popup menu at mouse position
         self.PopupMenu(menu)
         menu.Destroy()
@@ -200,15 +200,15 @@ class StatusBar(wx.StatusBar):
     def OnSaveLogToFile(self, event):
         """Save log to a text file."""
         with wx.FileDialog(
-            self, 
-            "Save Log to file", 
-            wildcard="Text files (*.txt)|*.txt|Log files (*.log)|*.log|All files (*.*)|*.*", 
+            self,
+            "Save Log to file",
+            wildcard="Text files (*.txt)|*.txt|Log files (*.log)|*.log|All files (*.*)|*.*",
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT
         ) as fileDialog:
-            
+
             if fileDialog.ShowModal() == wx.ID_CANCEL:
                 return
-            
+
             path = fileDialog.GetPath()
             Log.write_to_file(path)
             self.SetStatusText(f"Log saved to: {path}")
@@ -219,7 +219,7 @@ class StatusBar(wx.StatusBar):
             # Format log entries for clipboard
             log_entries = Log.get()
             clipboard_content = "\n".join([f"[{timestamp}] {message}" for timestamp, message in log_entries])
-            
+
             # Copy to clipboard
             if wx.TheClipboard.Open():
                 wx.TheClipboard.SetData(wx.TextDataObject(clipboard_content))
@@ -227,18 +227,18 @@ class StatusBar(wx.StatusBar):
                 self.SetStatusText(f"Copied {len(log_entries)} log entries to clipboard")
             else:
                 self.SetStatusText("Error: Could not access clipboard")
-                
+
         except Exception as e:
             self.SetStatusText(f"Error copying to clipboard: {e}")
 
     def OnClearLog(self, event):
         """Clear the log after confirmation."""
         result = wx.MessageBox(
-            "Are you sure you want to clear the entire log?", 
-            "Clear Log", 
+            "Are you sure you want to clear the entire log?",
+            "Clear Log",
             wx.YES_NO | wx.ICON_QUESTION
         )
-        
+
         if result == wx.YES:
             Log.clear()
             self.SetStatusText("Log cleared")

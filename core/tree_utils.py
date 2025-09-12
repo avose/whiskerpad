@@ -11,7 +11,7 @@ from core.tree import load_entry, save_entry, create_node, get_root_ids, set_roo
 
 __all__ = [
     "add_sibling_after",
-    "indent_under_prev_sibling", 
+    "indent_under_prev_sibling",
     "outdent_to_parent_sibling",
     "move_entry_after",
     "set_collapsed",
@@ -31,7 +31,7 @@ def get_ancestors(notebook_dir: str, entry_id: str) -> List[str]:
     """Get all ancestor entry IDs from target up to root (excluding target itself)."""
     ancestors = []
     current_id = entry_id
-    
+
     while current_id:
         try:
             entry = load_entry(notebook_dir, current_id)
@@ -44,7 +44,7 @@ def get_ancestors(notebook_dir: str, entry_id: str) -> List[str]:
         except Exception:
             # Entry doesn't exist or is corrupted
             break
-    
+
     return ancestors  # Returns [parent, grandparent, great-grandparent, ...]
 
 # ---------- Selection-adjacent create ----------
@@ -74,14 +74,14 @@ def add_sibling_after(notebook_dir: str, cur_id: str) -> Optional[str]:
 
     idx = ids.index(cur_id)
     new_id = create_node(notebook_dir, parent_id=None)  # appends by default
-    
+
     # Refresh and reorder
     ids = get_root_ids(notebook_dir)
     if new_id in ids:
         ids.remove(new_id)
         ids.insert(min(idx + 1, len(ids)), new_id)
         set_root_ids(notebook_dir, ids)
-    
+
     return new_id
 
 # ---------- Indent / Outdent / Move ----------

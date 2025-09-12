@@ -12,7 +12,7 @@ import shutil
 from core.log import Log
 from core.tree_utils import (
     add_sibling_after,
-    move_entry_after, 
+    move_entry_after,
     indent_under_prev_sibling,
     outdent_to_parent_sibling,
     toggle_collapsed,
@@ -41,7 +41,7 @@ class FlatTree:
     between the persistent tree structure and flat display list. Also handles
     view-dependent operations like ancestor expansion and navigation.
     """
-    
+
     def __init__(self, view):
         self.view = view
         self.notebook_dir = view.notebook_dir
@@ -90,12 +90,12 @@ class FlatTree:
         """Efficiently create multiple siblings (for PDF import)."""
         new_ids = []
         current_target = target_id
-        
+
         for ndx in range(count):
             new_id = self.create_sibling_after(current_target)
             new_ids.append(new_id)
             current_target = new_id  # Chain insertions
-            
+
         return new_ids
 
     @check_read_only
@@ -105,27 +105,27 @@ class FlatTree:
         new_id = add_sibling_after(self.notebook_dir, target_id)
         if not new_id:
             raise RuntimeError("Failed to create sibling")
-        
+
         # 2. Find target in flat list and calculate insertion position
         target_idx = self._find_row_index(target_id)
         if target_idx is None:
             # Fallback to full rebuild if target not found
             self.view.rebuild()
             return new_id
-            
+
         # 3. Apply the critical descendant-aware insertion logic
         insert_idx = self._find_insertion_after_descendants(target_idx)
         level = self.view._rows[target_idx].level
-        
+
         # 4. Insert into flat list
         new_row = Row(kind="node", entry_id=new_id, level=level)
         self.view._rows.insert(insert_idx, new_row)
-        
+
         # 5. Update layout index and UI
         self._update_after_insertion(insert_idx, new_row)
-        
+
         return new_id
-    
+
     @check_read_only
     def create_child_under(
             self,
@@ -135,20 +135,20 @@ class FlatTree:
     ) -> str:
         """Create child under parent at specified index (or end)."""
         new_id = create_node(self.notebook_dir, parent_id=parent_id, content=content, insert_index=index)
-        
+
         # Find insertion point in flat list
         parent_idx = self._find_row_index(parent_id)
         if parent_idx is None:
             self.view.rebuild()
             return new_id
-            
+
         # Insert after parent (children immediately follow parent)
         parent_level = self.view._rows[parent_idx].level
         insert_idx = parent_idx + 1
-        
+
         new_row = Row(kind="node", entry_id=new_id, level=parent_level + 1)
         self.view._rows.insert(insert_idx, new_row)
-        
+
         self._update_after_insertion(insert_idx, new_row)
         return new_id
 
@@ -186,11 +186,11 @@ class FlatTree:
             return False
         if not move_entry_after(self.notebook_dir, source_id, target_id):
             return False
-            
+
         # Full rebuild for moves (simpler and safer)
         self.view.rebuild()
         return True
-    
+
     @check_read_only
     def delete_entry(self, entry_id: str) -> bool:
         """
@@ -226,8 +226,8 @@ class FlatTree:
             items = parent.get("items", [])
             parent["items"] = [
                 item for item in items
-                if not (isinstance(item, dict) and 
-                       item.get("type") == "child" and 
+                if not (isinstance(item, dict) and
+                       item.get("type") == "child" and
                        item.get("id") == entry_id)
             ]
             save_entry(self.notebook_dir, parent)
@@ -254,23 +254,23 @@ class FlatTree:
         self.view.rebuild()
 
         return True
-    
+
     @check_read_only
     def indent_entry(self, entry_id: str) -> bool:
         """Indent entry under previous sibling."""
         if not indent_under_prev_sibling(self.notebook_dir, entry_id):
             return False
-            
+
         # Use incremental update instead of full rebuild
         self._refresh_hierarchy_change(entry_id)
         return True
-    
+
     @check_read_only
     def outdent_entry(self, entry_id: str) -> bool:
         """Outdent entry to parent level."""
         if not outdent_to_parent_sibling(self.notebook_dir, entry_id):
             return False
-            
+
         self._refresh_hierarchy_change(entry_id)
         return True
 
@@ -313,7 +313,7 @@ class FlatTree:
         """Toggle collapse state of entry."""
         current_state = self.is_collapsed(entry_id)
         return self.set_collapsed_state(entry_id, not current_state)
-   
+
     def expand_ancestors(self, entry_id: str) -> bool:
         """Expand all ancestors of the target entry. Returns True if any were expanded."""
         expanded_any = False
@@ -374,33 +374,33 @@ class FlatTree:
 
         # 4. Navigate to the target entry
         return self.view.select_entry(entry_id, ensure_visible=True)
-    
+
     # ------------------------------------------------------------------ #
     # Helper methods
     # ------------------------------------------------------------------ #
-    
+
     def _find_row_index(self, entry_id: str) -> Optional[int]:
         """Find row index for entry_id."""
         for i, row in enumerate(self.view._rows):
             if row.entry_id == entry_id:
                 return i
         return None
-    
+
     def _collect_descendants(self, start_idx: int) -> Set[str]:
         """Collect all descendant entry IDs starting from row index."""
         if start_idx >= len(self.view._rows):
             return set()
-            
+
         descendants = {self.view._rows[start_idx].entry_id}
         start_level = self.view._rows[start_idx].level
-        
+
         for i in range(start_idx + 1, len(self.view._rows)):
             if self.view._rows[i].level <= start_level:
                 break
             descendants.add(self.view._rows[i].entry_id)
-            
+
         return descendants
-    
+
     @check_read_only
     def _update_after_insertion(self, insert_idx: int, new_row: Row):
         """Update layout and UI after row insertion."""
@@ -411,7 +411,7 @@ class FlatTree:
             Log.debug(f"Cache invalidation failed for {new_row.entry_id}: {e}")
         self.view.SetVirtualSize((-1, self.view._index.content_height()))
         self.view._refresh_from_row(insert_idx)
-    
+
     def _refresh_hierarchy_change(self, entry_id: str):
         """Refresh after hierarchy change (indent/outdent)."""
         try:
@@ -419,7 +419,7 @@ class FlatTree:
         except Exception as e:
             Log.debug(f"Cache invalidation failed for {entry_id}: {e}")
         self.view.rebuild()  # Could be optimized to incremental later
-        
+
         # Restore selection to the moved entry
         for i, row in enumerate(self.view._rows):
             if row.entry_id == entry_id:

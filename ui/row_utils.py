@@ -17,7 +17,7 @@ from ui.image_transform import get_current_thumbnail_max_size
 __all__ = [
     "has_children",
     "date_gutter_hit",
-    "caret_hit", 
+    "caret_hit",
     "item_rect",
     "is_image_row",
     "get_image_file_path",
@@ -47,13 +47,13 @@ def caret_hit(view, row: Row, rect: wx.Rect, pos: wx.Point) -> bool:
     Y is ignored to avoid subtle geometry mismatches.
     """
     level = int(row.level)
-    
+
     # Start of clickable area: right after date column
     left_edge = rect.x + view.DATE_COL_W
-    
+
     # End of clickable area: where text content starts
     text_start = left_edge + view.PADDING + level * view.INDENT_W + view.GUTTER_W
-    
+
     # Entire left margin is clickable for row selection
     return left_edge <= pos.x < text_start
 
@@ -73,7 +73,7 @@ def is_image_row(view, row_idx: int) -> bool:
     """Check if the given row displays an image."""
     if not (0 <= row_idx < len(view._rows)):
         return False
-    
+
     row = view._rows[row_idx]
     layout = view.cache.layout(row.entry_id) or {}
     return layout.get("is_img", False)
@@ -82,7 +82,7 @@ def get_image_filename(view, row_idx: int) -> Optional[str]:
     """Get the image filename for an image row."""
     if not is_image_row(view, row_idx):
         return None
-    
+
     row = view._rows[row_idx]
     layout = view.cache.layout(row.entry_id) or {}
     return layout.get("img_file")
@@ -92,14 +92,14 @@ def get_image_file_path(view, row_idx: int) -> Optional[str]:
     filename = get_image_filename(view, row_idx)
     if not filename:
         return None
-    
+
     row = view._rows[row_idx]
     image_dir = entry_dir(view.notebook_dir, row.entry_id)
     image_path = image_dir / filename
-    
+
     if image_path.exists():
         return str(image_path)
-    
+
     return None
 
 def get_original_image_dimensions(view, row_idx: int) -> Optional[Tuple[int, int]]:
@@ -107,16 +107,16 @@ def get_original_image_dimensions(view, row_idx: int) -> Optional[Tuple[int, int
     image_path = get_image_file_path(view, row_idx)
     if not image_path:
         return None
-    
+
     # Load the original image to get its dimensions
     import wx
     if not wx.App.IsMainLoopRunning():
         app = wx.App.GetInstance()
         if app is None:
             wx.App(False)
-    
+
     img = wx.Image(image_path)
     if not img.IsOk():
         return None
-        
+
     return (img.GetWidth(), img.GetHeight())

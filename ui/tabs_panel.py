@@ -19,7 +19,7 @@ class TabInfo:
     def __init__(self, entry_id: str, display_text: str, color=None):
         self.entry_id = entry_id
         self.display_text = display_text
-        
+
         # Ensure color is always a wx.Colour object
         if color is None:
             self.color = wx.Colour(200, 200, 200)  # Default gray
@@ -53,7 +53,7 @@ class TabInfo:
 
 class TabsPanel(wx.Panel):
     """Vertical tabs panel with physical file tab appearance."""
-    
+
     def __init__(
         self,
         parent: wx.Window,
@@ -67,7 +67,7 @@ class TabsPanel(wx.Panel):
         self.selected_tab_idx = -1
         self.hover_tab_idx = -1
         self.scroll_offset = 0  # Smooth scrolling offset in pixels
-        
+
         # Drawing constants
         self.TAB_WIDTH = 24
         self.TAB_MIN_HEIGHT = 60
@@ -75,14 +75,14 @@ class TabsPanel(wx.Panel):
         self.ARROW_HEIGHT = 16
         self.TAB_SPACING = 2
         self.TAB_ANGLE = 5  # Pixels for angled cut
-        
+
         # Colors
         self.ACTIVE_TAB_COLOR = wx.Colour(255, 255, 255)
         self.INACTIVE_TAB_COLOR = wx.Colour(235, 235, 235)
         self.HOVER_TAB_COLOR = wx.Colour(245, 245, 245)
         self.ACTIVE_TEXT_COLOR = wx.Colour(0, 0, 0)
         self.INACTIVE_TEXT_COLOR = wx.Colour(0, 0, 0)
-        
+
         # Fonts
         base_font = self.GetFont()
         self.normal_font = base_font
@@ -92,7 +92,7 @@ class TabsPanel(wx.Panel):
             wx.FONTSTYLE_NORMAL,
             wx.FONTWEIGHT_BOLD
         )
-        
+
         self._setup_drawing()
         self._bind_events()
 
@@ -107,7 +107,7 @@ class TabsPanel(wx.Panel):
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.SetDoubleBuffered(True)
         self.SetMinSize((self.TAB_WIDTH + 4, -1))
-    
+
     def _bind_events(self):
         """Bind all event handlers."""
         self.Bind(wx.EVT_PAINT, self._on_paint)
@@ -313,16 +313,16 @@ class TabsPanel(wx.Panel):
         dc.SetFont(self.normal_font)
         text_width, text_height = dc.GetTextExtent(text)
         # When rotated 90° clockwise, text_width becomes the tab height
-        return max(self.TAB_MIN_HEIGHT, 
+        return max(self.TAB_MIN_HEIGHT,
                    min(text_width + 20, self.TAB_MAX_HEIGHT))
-    
+
     def _get_total_tabs_height(self) -> int:
         """Get total height needed for all tabs."""
         total = 0
         for tab in self.tabs:
             total += self._calculate_tab_height(tab.display_text) + self.TAB_SPACING
         return total
-    
+
     def _need_scrolling(self) -> bool:
         """Check if scrolling is needed."""
         client_height = self.GetClientSize().height
@@ -330,7 +330,7 @@ class TabsPanel(wx.Panel):
 
         # Only need scrolling if tabs don't fit in full client area
         return total_tabs_height > client_height
-    
+
     def _on_paint(self, evt: wx.PaintEvent):
         """Paint the tabs panel."""
         dc = wx.AutoBufferedPaintDC(self)
@@ -361,22 +361,22 @@ class TabsPanel(wx.Panel):
 
         # Draw tabs in the available area
         self._draw_tabs(gc, tabs_start_y, tabs_end_y, size.width)
-    
+
     def _draw_scroll_arrows(self, gc: wx.GraphicsContext, size: wx.Size):
         """Draw up and down scroll arrows."""
         arrow_width = size.width
-        
+
         # Up arrow background
         gc.SetBrush(wx.Brush(wx.Colour(220, 220, 220)))
         gc.DrawRectangle(0, 0, arrow_width, self.ARROW_HEIGHT)
-        
-        # Down arrow background  
+
+        # Down arrow background
         gc.SetBrush(wx.Brush(wx.Colour(220, 220, 220)))
         gc.DrawRectangle(0, size.height - self.ARROW_HEIGHT, arrow_width, self.ARROW_HEIGHT)
-        
+
         # Arrow shapes (simple triangles)
         gc.SetBrush(wx.Brush(wx.Colour(100, 100, 100)))
-        
+
         # Up arrow triangle
         center_x = arrow_width // 2
         up_points = [
@@ -385,7 +385,7 @@ class TabsPanel(wx.Panel):
             (center_x + 4, self.ARROW_HEIGHT - 3)
         ]
         gc.DrawLines(up_points)
-        
+
         # Down arrow triangle
         down_y = size.height - self.ARROW_HEIGHT
         down_points = [
@@ -394,7 +394,7 @@ class TabsPanel(wx.Panel):
             (center_x + 4, down_y + 3)
         ]
         gc.DrawLines(down_points)
-    
+
     def _draw_tabs(self, gc: wx.GraphicsContext, start_y: int, end_y: int, width: int):
         """Draw all visible tabs within the clipped area."""
 
@@ -412,7 +412,7 @@ class TabsPanel(wx.Panel):
                 current_y += tab_height + self.TAB_SPACING
                 continue
 
-            # Stop if tab is completely below visible area  
+            # Stop if tab is completely below visible area
             if current_y > end_y:
                 break
 
@@ -426,7 +426,7 @@ class TabsPanel(wx.Panel):
 
         # Restore graphics context state
         gc.PopState()
-    
+
     def _draw_tab(self, gc: wx.GraphicsContext, tab: TabInfo, y: int, height: int,
                   width: int, is_selected: bool, is_hover: bool):
         """Draw a single tab with trapezoid shape and custom colors."""
@@ -517,12 +517,12 @@ class TabsPanel(wx.Panel):
         text_width, text_height = gc.GetTextExtent(tab.display_text)
         gc.DrawText(tab.display_text, -text_width // 2, -text_height // 2)
         gc.PopState()
-    
+
     def _on_mouse_down(self, evt: wx.MouseEvent):
         """Handle mouse clicks."""
         pos = evt.GetPosition()
         size = self.GetClientSize()
-        
+
         # Check scroll arrows first
         if self._need_scrolling():
             if pos.y <= self.ARROW_HEIGHT:
@@ -531,66 +531,66 @@ class TabsPanel(wx.Panel):
             elif pos.y >= size.height - self.ARROW_HEIGHT:
                 self._scroll_down()
                 return
-        
+
         # Check tab clicks
         tab_idx = self._hit_test_tabs(pos)
         if tab_idx >= 0 and tab_idx < len(self.tabs):
             self.selected_tab_idx = tab_idx
             self.Refresh()
-            
+
             if self.on_tab_click:
                 tab = self.tabs[tab_idx]
                 self.on_tab_click(tab.entry_id)
-    
+
     def _on_motion(self, evt: wx.MouseEvent):
         """Handle mouse motion for hover effects."""
         old_hover = self.hover_tab_idx
         self.hover_tab_idx = self._hit_test_tabs(evt.GetPosition())
-        
+
         if old_hover != self.hover_tab_idx:
             self.Refresh()
-    
+
     def _on_leave(self, evt: wx.MouseEvent):
         """Clear hover state when mouse leaves panel."""
         if self.hover_tab_idx >= 0:
             self.hover_tab_idx = -1
             self.Refresh()
-    
+
     def _on_mouse_wheel(self, evt: wx.MouseEvent):
         """Handle smooth scrolling with mouse wheel."""
         if not self._need_scrolling():
             return
-        
+
         # 32 pixels per scroll notch
         delta = -evt.GetWheelRotation() // evt.GetWheelDelta() * 32
         self._scroll_by_pixels(delta)
-    
+
     def _hit_test_tabs(self, pos: wx.Point) -> int:
         """Determine which tab was clicked. Returns tab index or -1."""
         size = self.GetClientSize()
-        
+
         if self._need_scrolling():
             tabs_start_y = self.ARROW_HEIGHT
             tabs_end_y = size.height - self.ARROW_HEIGHT
         else:
             tabs_start_y = 0
             tabs_end_y = size.height
-        
+
         if pos.y < tabs_start_y or pos.y > tabs_end_y:
             return -1
-        
+
         current_y = tabs_start_y - self.scroll_offset
-        
+
         for i, tab in enumerate(self.tabs):
             tab_height = self._calculate_tab_height(tab.display_text)
-            
+
             if current_y <= pos.y <= current_y + tab_height:
                 return i
-            
+
             current_y += tab_height + self.TAB_SPACING
-        
+
         return -1
-    
+
     def _scroll_up(self):
         """Scroll up by one tab height."""
         if not self._need_scrolling() or not self.tabs:
@@ -605,7 +605,7 @@ class TabsPanel(wx.Panel):
         if not self._need_scrolling() or not self.tabs:
             return
 
-        # Find average tab height for consistent scrolling  
+        # Find average tab height for consistent scrolling
         avg_tab_height = self._get_average_tab_height()
         self._scroll_by_pixels(avg_tab_height)
 
@@ -631,34 +631,34 @@ class TabsPanel(wx.Panel):
 
         self.scroll_offset = max(0, min(max_offset, self.scroll_offset + delta))
         self.Refresh()
-    
+
     # Public API methods
     def add_tab(self, entry_id: str, display_text: str):
         """Add a new tab."""
         # Truncate display text if too long
         if len(display_text) > 15:
             display_text = display_text[:12] + "..."
-        
+
         tab = TabInfo(entry_id, display_text)
         self.tabs.append(tab)
         self.Refresh()
-    
+
     def remove_tab(self, entry_id: str) -> bool:
         """Remove tab by entry ID. Returns True if found and removed."""
         for i, tab in enumerate(self.tabs):
             if tab.entry_id == entry_id:
                 self.tabs.pop(i)
-                
+
                 # Adjust selection if needed
                 if self.selected_tab_idx >= len(self.tabs):
                     self.selected_tab_idx = len(self.tabs) - 1
                 elif self.selected_tab_idx >= i:
                     self.selected_tab_idx -= 1
-                
+
                 self.Refresh()
                 return True
         return False
-    
+
     def select_tab(self, entry_id: str) -> bool:
         """Select tab by entry ID. Returns True if found."""
         for i, tab in enumerate(self.tabs):
@@ -667,7 +667,7 @@ class TabsPanel(wx.Panel):
                 self.Refresh()
                 return True
         return False
-    
+
     def clear_tabs(self):
         """Remove all tabs."""
         self.tabs.clear()

@@ -23,87 +23,87 @@ def _get_line_info_from_cache(view, entry_id: str):
         if r.entry_id == entry_id:
             row = r
             break
-    
+
     if not row:
         return []
-    
+
     # Get cached layout data
     from ui.layout import client_text_width, ensure_wrap_cache
     width = client_text_width(view, row.level)
     if not view.cache.layout_valid(entry_id, width):
         ensure_wrap_cache(view, row)
-    
+
     layout = view.cache.layout(entry_id)
     if not layout or layout.get("is_img"):
         return []
-    
+
     return layout.get("rich_lines", [])
 
 def _get_line_col_from_position(view, entry_id: str, pos: int):
     """Get line and column from character position using cached line boundaries."""
     rich_lines = _get_line_info_from_cache(view, entry_id)
-    
+
     for line_idx, line in enumerate(rich_lines):
         start_char = line['start_char']
         end_char = line['end_char']
-        
+
         # Normal case: position within line
         if start_char <= pos < end_char:
             col = pos - start_char
             Log.debug(f"pos {pos} mapped to line {line_idx}, col {col}", 75)
             return line_idx, col
-        
+
         # Special case: position at end of line (but not the last line)
         if pos == end_char and line_idx < len(rich_lines) - 1:
             col = end_char - start_char
             Log.debug(f"pos {pos} mapped to end of line {line_idx}, col {col}", 75)
             return line_idx, col
-    
+
     # Position at end of entire text - map to last line
     if rich_lines:
         last_line = rich_lines[-1]
         col = pos - last_line['start_char']
         Log.debug(f"pos {pos} mapped to last line {len(rich_lines) - 1}, col {col}", 75)
         return len(rich_lines) - 1, col
-    
+
     return 0, 0
 
 def _get_position_from_line_col(view, entry_id: str, line_idx: int, col: int):
     """Get character position from line and column using cached boundaries."""
     rich_lines = _get_line_info_from_cache(view, entry_id)
-    
+
     if line_idx < 0 or line_idx >= len(rich_lines):
         return None
-    
+
     line = rich_lines[line_idx]
     line_length = line['end_char'] - line['start_char']
     clamped_col = min(col, line_length)
-    
+
     return line['start_char'] + clamped_col
 
 def _move_cursor_up_line(edit_state, view):
     """Move cursor up one line using cached line boundaries."""
     entry_id = edit_state.entry_id
     cursor_pos = edit_state.cursor_pos
-    
+
     current_line, current_col = _get_line_col_from_position(view, entry_id, cursor_pos)
-    
+
     if current_line <= 0:
         return None  # Already on first line
-    
+
     return _get_position_from_line_col(view, entry_id, current_line - 1, current_col)
 
 def _move_cursor_down_line(edit_state, view):
     """Move cursor down one line using cached line boundaries."""
     entry_id = edit_state.entry_id
     cursor_pos = edit_state.cursor_pos
-    
+
     current_line, current_col = _get_line_col_from_position(view, entry_id, cursor_pos)
     rich_lines = _get_line_info_from_cache(view, entry_id)
-    
+
     if current_line >= len(rich_lines) - 1:
         return None  # Already on last line
-    
+
     return _get_position_from_line_col(view, entry_id, current_line + 1, current_col)
 
 def _handle_single_line_arrow_navigation(view, key_code) -> bool:
@@ -208,7 +208,7 @@ def handle_edit_mode_keys(view, evt: wx.KeyEvent) -> bool:
 
     if evt.ControlDown() and key_code == ord('A'):
         return _handle_select_all(view, evt)
-    
+
     return _handle_text_input(view, evt)
 
 def _handle_escape_key(view) -> bool:

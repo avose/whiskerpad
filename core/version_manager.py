@@ -31,38 +31,38 @@ __all__ = ["VersionManager"]
 class VersionManager:
     """
     High-Level Version Control Coordinator for WhiskerPad Notebooks
-    
+
     ARCHITECTURE OVERVIEW:
     =====================
-    
+
     This class serves as the central coordinator for WhiskerPad's "time machine" functionality.
     It manages the lifecycle of notebook versioning through a simple state machine:
-    
+
     NORMAL MODE → HISTORY BROWSING MODE → [Optional: REWIND] → NORMAL MODE
-    
+
     KEY DESIGN PRINCIPLES:
     - Never calls Git commands directly - only uses functions from core.git
     - Maintains mutual exclusion: history browsing = read-only mode
     - Always commits changes before entering history mode (prevents conflicts)
     - Thread-safe through internal locking for concurrent notebook access
-    
+
     STATE MANAGEMENT:
     - Each notebook directory has its own VersionManager.NotebookState
     - State tracks commit timing, change counts, and history browsing mode
     - Auto-commits happen every 5+ minutes when changes are detected
     - Manual checkpoints can be triggered by user at any time
-    
+
     HISTORY BROWSING WORKFLOW:
     1. User opens history browser → auto-commit current changes → enter read-only mode
-    2. User selects historical commit → temporary checkout → main UI shows old state  
+    2. User selects historical commit → temporary checkout → main UI shows old state
     3. User can "rewind" (destructive) → hard reset + return to normal mode
     4. User closes browser → return to HEAD → exit read-only mode
-    
+
     COMMIT CONSOLIDATION:
     - Automatically consolidates old commits to prevent unbounded growth
     - Recent commits kept at full granularity, older ones get squashed
     - Uses time-based retention policy (minutes→hours→days→months→years)
-    
+
     ERROR HANDLING:
     - Git/LFS availability checked before operations
     - Auto-commit failures are logged but don't block user workflow
@@ -72,7 +72,7 @@ class VersionManager:
     def __init__(self, io_worker):
         """
         Initialize the VersionManager.
-        
+
         Args:
             io_worker: Background thread pool for async Git operations
         """
@@ -84,12 +84,12 @@ class VersionManager:
     class NotebookState:
         """
         Internal state tracking for a single notebook's versioning status.
-        
+
         This encapsulates all the information needed to coordinate versioning
         operations for one notebook directory, including timing, change tracking,
         and read-only mode state.
         """
-        
+
         def __init__(self):
             self.last_commit_time = 0.0        # Unix timestamp of last commit
             self.changes_since_commit = 0      # Change counter (for future use)
@@ -112,10 +112,10 @@ class VersionManager:
         """
         Ensure that the notebook directory is properly set up as a Git repository
         with Git LFS configured for image files.
-        
+
         This is called automatically by other methods but can also be called
         explicitly during notebook initialization.
-        
+
         Raises:
             GitError: If Git/LFS is not available or initialization fails
         """
@@ -125,7 +125,7 @@ class VersionManager:
                 "Git is not installed or not found in the system path.\n"
                 "Please install Git before using version control features."
             )
-        
+
         if not is_lfs_available():
             raise GitError(
                 "Git LFS is not installed or not found in the system path.\n"
@@ -139,28 +139,28 @@ class VersionManager:
     def note_change(self, notebook_dir: str):
         """
         Signal that content has changed in the notebook.
-        
+
         This is called by the NotebookCache when entries are saved.
         It's the minimal hook point that triggers auto-commit consideration.
         """
         state = self._get_state(notebook_dir)
-        
+
         with self._lock:
             state.changes_since_commit += 1
         Log.debug(f"Change noted. (total: {state.changes_since_commit})", 100)
-        
+
         # Consider auto-commit (runs async check)
         self.auto_commit_if_needed(notebook_dir)
 
     def auto_commit_if_needed(self, notebook_dir: str):
         """
         Check if conditions are met for an automatic commit and trigger one if so.
-        
+
         Auto-commit happens when:
         - At least 5 minutes have passed since last commit
         - Notebook is not in history browsing mode (read-only)
         - There are actual changes to commit (detected by git diff)
-        
+
         This method runs asynchronously and does not block the UI.
         Failures are logged but do not interrupt user workflow.
         """
@@ -201,7 +201,7 @@ class VersionManager:
                 except GitError as e:
                     # Log but don't raise - auto-commit failures shouldn't break workflow
                     Log.debug(f"Auto-commit failed: {e}")
-                    
+
             self.io_worker.submit(async_commit)
 
         except Exception as e:
@@ -224,7 +224,7 @@ class VersionManager:
             if changed_count == 0:
                 return "Auto-save: changes detected"
             else:
-                entry_word = "entry" if changed_count == 1 else "entries" 
+                entry_word = "entry" if changed_count == 1 else "entries"
                 return f"Auto-save: {changed_count} {entry_word} changed"
 
         except GitError:
@@ -269,26 +269,26 @@ class VersionManager:
     def open_history_browser(self, notebook_dir: str) -> List[CommitInfo]:
         """
         Prepare for history browsing by entering read-only mode.
-        
+
         CRITICAL WORKFLOW:
         1. Auto-commit any current changes (prevents data loss)
         2. Switch notebook to read-only mode (prevents new commits)
         3. Return commit history for UI display
-        
+
         This ensures that:
         - No work can be lost (everything is committed before browsing)
         - No conflicts can occur (read-only prevents concurrent changes)
         - History is complete and current (includes any uncommitted work)
-        
+
         Returns:
             List of CommitInfo objects for display in history browser UI
-            
+
         Raises:
             GitError: If repository initialization fails
         """
         Log.debug(f"Opening history browser.", 1)
         state = self._get_state(notebook_dir)
-        
+
         # If already in history mode, just return current history
         if state.in_history_mode:
             Log.debug(f"History browser already open.", 1)
@@ -316,47 +316,47 @@ class VersionManager:
     def view_historical_commit(self, notebook_dir: str, commit_hash: str) -> bool:
         """
         Checkout a specific commit for historical viewing (read-only).
-        
+
         This temporarily changes the working directory to show the notebook
         as it existed at the specified commit. The main UI will trigger a
         full rebuild() to display the historical state.
-        
+
         Args:
             commit_hash: Git commit hash to checkout
-            
+
         Returns:
             True if checkout successful, False otherwise
-            
+
         Raises:
             GitError: If not currently in history browsing mode
         """
         Log.debug(f"Viewing historical commit {commit_hash[:8]}", 1)
         state = self._get_state(notebook_dir)
-        
+
         if not state.in_history_mode:
             raise GitError("History browser must be open to view historical commits.")
 
         # Checkout the specified commit
         success = checkout_commit(notebook_dir, commit_hash)
-        
+
         if success:
             with self._lock:
                 state.readonly_commit = commit_hash
             Log.debug(f"Successfully checked out commit {commit_hash[:8]}", 1)
         else:
             Log.debug(f"Failed to checkout commit {commit_hash[:8]}")
-                
+
         return success
 
     def close_history_browser(self, notebook_dir: str) -> bool:
         """
         Exit history browsing mode and return to normal editing.
-        
+
         WORKFLOW:
         1. Checkout the latest commit (HEAD) to restore current state
         2. Exit read-only mode to re-enable editing
         3. Main UI will trigger rebuild() to show current state
-        
+
         Returns:
             True if successful return to normal mode
         """
@@ -369,7 +369,7 @@ class VersionManager:
 
         # Return to the latest commit (HEAD of main/master branch)
         success = return_to_head(notebook_dir)
-        
+
         if success:
             with self._lock:
                 state.readonly_commit = None
@@ -383,14 +383,14 @@ class VersionManager:
     def consolidate_history(self, notebook_dir: str) -> bool:
         """
         Trigger commit consolidation to keep Git history manageable.
-        
+
         This uses the time-based retention policy to squash old commits:
         - Recent commits: Keep all (full granularity)
         - Older commits: Progressive consolidation by time buckets
-        
+
         This should be called periodically (e.g., daily) or after significant
         numbers of commits accumulate.
-        
+
         Returns:
             True if consolidation successful or not needed
         """
@@ -410,7 +410,7 @@ class VersionManager:
     def is_in_history_mode(self, notebook_dir: str) -> bool:
         """
         Check if the specified notebook is currently in history browsing mode.
-        
+
         This can be used by the UI to determine whether to show read-only
         indicators and disable editing controls.
         """
@@ -420,7 +420,7 @@ class VersionManager:
     def get_current_commit(self, notebook_dir: str) -> Optional[str]:
         """
         Get the commit hash currently being viewed (for read-only mode).
-        
+
         Returns None if in normal editing mode, or the commit hash if
         viewing a historical state.
         """

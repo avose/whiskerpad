@@ -18,14 +18,14 @@ from ui.icons import wpIcons
 class BackgroundPanel(wx.Panel):
     def __init__(self, parent, image_path):
         super().__init__(parent)
-        
+
         # CRITICAL: Must set background style before using AutoBufferedPaintDC
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
-        
+
         self.background_bmp = wx.Bitmap(image_path, wx.BITMAP_TYPE_PNG)
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_ERASE_BACKGROUND, lambda evt: None)  # Prevent flicker
-    
+
     def on_paint(self, event):
         dc = wx.AutoBufferedPaintDC(self)
         dc.Clear()
@@ -34,28 +34,28 @@ class BackgroundPanel(wx.Panel):
 class wpAboutFrame(wx.Frame):
     def __init__(self, parent, style=wx.DEFAULT_FRAME_STYLE & ~(wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)):
         wx.Frame.__init__(self, parent, title="About WhiskerPad", style=style)
-        
+
         self.icon = wx.Icon()
         self.icon.CopyFromBitmap(wpIcons.Get('information'))
         self.SetIcon(self.icon)
-        
+
         # Load background image
         script_dir = os.path.dirname(os.path.abspath(__file__))
         script_pdir = Path(script_dir).parent.absolute()
         img_dir = os.path.join(script_pdir, "images")
         image_path = os.path.join(img_dir, "whiskerpad.jpg")
-        
+
         # Create background panel
         self.main_panel = BackgroundPanel(self, image_path)
-        
+
         # Get image dimensions
         bmp_size = self.main_panel.background_bmp.GetSize()
         bmp_width = bmp_size.width
         bmp_height = bmp_size.height
-        
+
         # Create main sizer
         main_sizer = wx.BoxSizer(wx.VERTICAL)
-        
+
         # Centered title at top
         title_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.st_title = wx.StaticText(self.main_panel, wx.ID_ANY, "WhiskerPad")
@@ -74,13 +74,13 @@ class wpAboutFrame(wx.Frame):
         version_sizer.Add(self.st_version, 0, wx.ALIGN_CENTER)
         version_sizer.AddStretchSpacer()
         main_sizer.Add(version_sizer, 0, wx.EXPAND | wx.BOTTOM, 20)
-        
+
         # Horizontal sizer for description on right half
         content_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
+
         # Left spacer (left half of frame)
         content_sizer.AddSpacer(bmp_width // 4)
-        
+
         # Description text on right half
         self.description = (
             "WhiskerPad is a hierarchical note-taking\n"
@@ -96,9 +96,9 @@ class wpAboutFrame(wx.Frame):
         self.st_description.SetFont(wx.Font(wx.FontInfo(10)))
         self.st_description.SetForegroundColour(wx.Colour(70, 70, 70))
         content_sizer.Add(self.st_description, 0, wx.ALL, 20)
-        
+
         main_sizer.Add(content_sizer, 1, wx.EXPAND)
-        
+
         # OK button at bottom right
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.btn_ok = wx.Button(self.main_panel, wx.ID_OK, "OK")
@@ -106,19 +106,19 @@ class wpAboutFrame(wx.Frame):
         button_sizer.AddStretchSpacer()
         button_sizer.Add(self.btn_ok, 0, wx.ALL, 4)
         main_sizer.Add(button_sizer, 0, wx.EXPAND)
-        
+
         # Set sizer and frame size
         self.main_panel.SetSizer(main_sizer)
         self.SetClientSize(bmp_size)
-        
+
         # Lock the frame size (prevent resizing)
         self.SetMinSize(self.GetSize())
         self.SetMaxSize(self.GetSize())
-        
+
         # Bind events
         self.Bind(wx.EVT_CLOSE, self.OnClose)
         self.btn_ok.Bind(wx.EVT_BUTTON, self.OnClose)
-        
+
         self.Center()
         self.Show(True)
         self.SetCursor(wx.Cursor(wx.CURSOR_ARROW))

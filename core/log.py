@@ -40,7 +40,7 @@ class LogManager():
                 filename = caller_frame.filename.split('/')[-1]
             else:
                 filename = "unknown"
-            
+
             # Format: [filename] message (removed debug level)
             formatted_msg = f"[{filename}] {text}"
             self.add(formatted_msg)

@@ -522,7 +522,7 @@ wpLGPLText = "		  GNU LESSER GENERAL PUBLIC LICENSE\n"\
 
 ################################################################################################
 class wpLicenseLGPL(wx.Window):
-    
+
     def __init__(self, parent):
         wx.Window.__init__(self, parent)
         self.license_text = wpLGPLText

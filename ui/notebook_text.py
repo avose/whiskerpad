@@ -56,25 +56,25 @@ def process_leading_newline(run_content, current_line, current_line_width, line_
             current_line = []
             current_line_width = 0
             line_start_char = next_line_start
-        
+
         # Account for the leading newline character in position tracking
         char_pos += 1
-        
+
         # Remove the leading newline so normal paragraph processing can handle the rest
         run_content = run_content[1:]
-    
+
     return run_content, current_line, current_line_width, line_start_char, char_pos, line_segments
 
 def word_wrap_paragraph(paragraph, run, current_line, current_line_width, line_start_char, char_pos, maxw, dc, line_height, line_segments):
     """Handle word-wrapping logic for a single paragraph within a run."""
     words = paragraph.split(' ')
-    
+
     for word_idx, word in enumerate(words):
         if word_idx > 0:
             word = ' ' + word
-        
+
         word_width = dc.GetTextExtent(word)[0]
-        
+
         # Check if word fits on current line
         if current_line_width + word_width <= maxw or not current_line:
             # Word fits or it's the first word on line
@@ -93,7 +93,7 @@ def word_wrap_paragraph(paragraph, run, current_line, current_line_width, line_s
             # Word doesn't fit - wrap to next line
             line_segment, next_line_start = finish_current_line(current_line, line_start_char, char_pos, line_height)
             line_segments.append(line_segment)
-            
+
             current_line = [{
                 'text': word,
                 'bold': run.bold,
@@ -106,7 +106,7 @@ def word_wrap_paragraph(paragraph, run, current_line, current_line_width, line_s
             current_line_width = word_width
             line_start_char = char_pos
             char_pos += len(word)
-    
+
     return current_line, current_line_width, char_pos
 
 def ensure_minimum_content(line_segments, line_height):
@@ -123,7 +123,7 @@ def ensure_minimum_content(line_segments, line_height):
 def measure_rich_text_wrapped(rich_text, maxw, dc, font_normal, font_bold, padding):
     """
     Measure wrapped rich text and return line information with formatting.
-    
+
     Returns:
         (line_segments, line_height, total_height_with_padding)
     """
@@ -140,7 +140,7 @@ def measure_rich_text_wrapped(rich_text, maxw, dc, font_normal, font_bold, paddi
 
     # Calculate line height
     line_height = calculate_line_height(dc, font_normal, font_bold)
-    
+
     # Initialize state
     line_segments = []
     current_line = []
@@ -155,12 +155,12 @@ def measure_rich_text_wrapped(rich_text, maxw, dc, font_normal, font_bold, paddi
 
         # Handle leading newlines (key fix for formatting bug)
         run_content, current_line, current_line_width, line_start_char, char_pos, line_segments = \
-            process_leading_newline(run.content, current_line, current_line_width, 
+            process_leading_newline(run.content, current_line, current_line_width,
                                     line_start_char, char_pos, line_height, line_segments)
 
         # Split remaining content by internal newlines
         paragraphs = run_content.split('\n')
-        
+
         for para_idx, paragraph in enumerate(paragraphs):
             # Handle explicit newlines between paragraphs
             if para_idx > 0:
@@ -188,7 +188,7 @@ def measure_rich_text_wrapped(rich_text, maxw, dc, font_normal, font_bold, paddi
 
             # Word-wrap this paragraph
             current_line, current_line_width, char_pos = word_wrap_paragraph(
-                paragraph, run, current_line, current_line_width, line_start_char, 
+                paragraph, run, current_line, current_line_width, line_start_char,
                 char_pos, maxw, dc, line_height, line_segments
             )
 

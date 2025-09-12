@@ -42,7 +42,7 @@ def char_pos_from_click(view, row_idx: int, click_pos: wx.Point) -> int:
         return 0
 
     row = view._rows[row_idx]
-    
+
     scroll_x, scroll_y = view.GetViewStart()
     scroll_y_px = scroll_y * view.GetScrollPixelsPerUnit()[1]
 

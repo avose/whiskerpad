@@ -16,7 +16,7 @@ class Clipboard:
     """
     Unified clipboard operations for text and images with cross-platform compatibility.
     """
-    
+
     @staticmethod
     def copy_text(text: str) -> bool:
         """Copy text to clipboard with Mac compatibility improvements."""
@@ -67,25 +67,25 @@ class Clipboard:
                 raise RuntimeError(f"Could not load image: {image_path}")
 
             bitmap = wx.Bitmap(image)
-            
+
             # Create composite data object for maximum compatibility
             composite = wx.DataObjectComposite()
-            
+
             # Add bitmap data (works with most image editors)
             bitmap_data = wx.BitmapDataObject(bitmap)
             composite.Add(bitmap_data, True)  # True = preferred format
-            
+
             # Add file data (works with file managers)
             file_data = wx.FileDataObject()
             file_data.AddFile(image_path)
             composite.Add(file_data, False)
-            
+
             success = wx.TheClipboard.SetData(composite)
             if success:
                 wx.TheClipboard.Flush()
             else:
                 raise RuntimeError("Failed to set image data on clipboard")
-            
+
             return success
         finally:
             wx.TheClipboard.Close()
@@ -100,7 +100,7 @@ class Clipboard:
             # Check for bitmap data first
             if wx.TheClipboard.IsSupported(wx.DataFormat(wx.DF_BITMAP)):
                 return True
-                
+
             # Check for file data that might be images
             if wx.TheClipboard.IsSupported(wx.DataFormat(wx.DF_FILENAME)):
                 file_data = wx.FileDataObject()
@@ -110,7 +110,7 @@ class Clipboard:
                         # Check if any file is a supported image format
                         image_files = [f for f in filenames if Clipboard._is_image_file(f)]
                         return len(image_files) > 0
-            
+
             return False
         finally:
             wx.TheClipboard.Close()
@@ -134,7 +134,7 @@ class Clipboard:
                         image = bitmap.ConvertToImage()
                         temp_fd, temp_path = tempfile.mkstemp(suffix='.png')
                         os.close(temp_fd)  # Close the file descriptor
-                        
+
                         if image.SaveFile(temp_path, wx.BITMAP_TYPE_PNG):
                             return temp_path
                         else:

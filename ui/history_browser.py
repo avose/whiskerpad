@@ -112,7 +112,7 @@ class HistoryBrowserDialog(wx.Dialog):
 
         # Text content
         text_sizer = wx.BoxSizer(wx.VERTICAL)
-        
+
         # Title
         title_label = wx.StaticText(header_panel, label="Notebook History")
         title_font = title_label.GetFont()
@@ -128,9 +128,9 @@ class HistoryBrowserDialog(wx.Dialog):
 
         text_sizer.Add(title_label, 0, wx.TOP, 8)
         text_sizer.Add(self.status_label, 0, wx.BOTTOM, 8)
-        
+
         header_sizer.Add(text_sizer, 1, wx.LEFT | wx.RIGHT, 8)
-        
+
         header_panel.SetSizer(header_sizer)
         parent_sizer.Add(header_panel, 0, wx.EXPAND)
 
@@ -144,8 +144,8 @@ class HistoryBrowserDialog(wx.Dialog):
         self.commit_list.AppendTextColumn("Date & Time", width=150)
         # Right-align the Changes column (numerical data)
         self.commit_list.AppendTextColumn(
-            "Changes", 
-            width=75, 
+            "Changes",
+            width=75,
             align=wx.ALIGN_RIGHT
         )
         self.commit_list.AppendTextColumn("Message", width=425)
@@ -177,7 +177,7 @@ class HistoryBrowserDialog(wx.Dialog):
         self.view_btn = wx.Button(button_panel, label=" View Selected")
         self.view_btn.SetToolTip("Temporarily view the selected historical version")
         self.view_btn.Enable(False)
-        
+
         # Set eye icon if available
         eye_icon = wpIcons.Get("eye")
         self.view_btn.SetBitmap(eye_icon)
@@ -186,7 +186,7 @@ class HistoryBrowserDialog(wx.Dialog):
         self.save_copy_btn = wx.Button(button_panel, label=" Save Copy")
         self.save_copy_btn.SetToolTip("Save a copy of this version to a new location")
         self.save_copy_btn.Enable(False)
-        
+
         # Set disk icon if available
         disk_icon = wpIcons.Get("disk")
         self.save_copy_btn.SetBitmap(disk_icon)
@@ -254,7 +254,7 @@ class HistoryBrowserDialog(wx.Dialog):
             self.commit_list.AppendItem([
                 "No commit history available",
                 "",
-                "Create your first checkpoint to see history", 
+                "Create your first checkpoint to see history",
                 ""
             ])
             return

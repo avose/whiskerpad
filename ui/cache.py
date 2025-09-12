@@ -149,32 +149,32 @@ class NotebookCache:
 
     def pixel_to_char(self, row: Row, click_x: int, click_y: int, text_area_x: int, text_area_y: int) -> int:
         """Convert pixel coordinates to character position using cached layout data."""
-        
+
         # Ensure we have valid layout data
         width = client_text_width(self.view, row.level)
         if not self.layout_valid(row.entry_id, width):
             ensure_wrap_cache(self.view, row)
-        
+
         layout = self.layout(row.entry_id)
         if not layout or layout.get("is_img"):
             # Image row or no layout - return 0
             return 0
-        
+
         rich_lines = layout.get("rich_lines", [])
         line_height = layout.get("line_h", self.view.ROW_H)
-        
+
         if not rich_lines:
             return 0
-        
+
         # Determine which line was clicked
         click_y_in_text = click_y - text_area_y
         if click_y_in_text < 0:
             return rich_lines[0]['start_char']
-        
+
         line_idx = max(0, int(click_y_in_text // line_height))
         if line_idx >= len(rich_lines):
             return rich_lines[-1]['end_char']
-        
+
         line = rich_lines[line_idx]
         click_x_in_line = click_x - text_area_x
 
@@ -207,20 +207,20 @@ class NotebookCache:
         font = self.view._bold if segment.get('bold') else self.view._font
         dc = wx.ClientDC(self.view)
         dc.SetFont(font)
-        
+
         # Binary search would be more efficient, but simple linear search for now
         best_pos = 0
         best_distance = abs(click_x_in_segment)
-        
+
         for i in range(len(text) + 1):
             substr = text[:i]
             width = dc.GetTextExtent(substr)[0]
             distance = abs(width - click_x_in_segment)
-            
+
             if distance < best_distance:
                 best_distance = distance
                 best_pos = i
-        
+
         return best_pos
 
     def layout_valid(self, entry_id: str, text_width: int) -> bool:

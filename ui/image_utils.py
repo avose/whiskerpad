@@ -35,7 +35,7 @@ def _fit_within(w: int, h: int, max_px: int) -> Tuple[int, int]:
     """
     if w <= 0 or h <= 0:
         return (max_px, max_px)
-    
+
     # Remove the upscaling restriction - always scale to fit max_px
     if w >= h:
         tw = max_px
@@ -43,7 +43,7 @@ def _fit_within(w: int, h: int, max_px: int) -> Tuple[int, int]:
     else:
         th = max_px
         tw = max(1, int(round(w * (max_px / float(h)))))
-    
+
     return (tw, th)
 
 

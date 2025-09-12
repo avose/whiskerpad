@@ -61,7 +61,7 @@ class GCView(wx.ScrolledWindow):
     """
     GraphicsContext-based, variable-row-height view of the entry tree
     with inline rich-text editing.
-    
+
     Now uses FlatTree for all tree/row operations.
     """
 
@@ -225,7 +225,7 @@ class GCView(wx.ScrolledWindow):
             soft_ensure_visible(self, idx)
 
         return True
-    
+
     def select_entry(self, entry_id: str, ensure_visible: bool = True) -> bool:
         """Select a row by entry id."""
         for i, r in enumerate(self._rows):
@@ -492,8 +492,8 @@ class GCView(wx.ScrolledWindow):
         # Check if we're deleting a newline (affects height)
         plain_text = self._edit_state.rich_text.to_plain_text()
         cursor_pos = self._edit_state.cursor_pos
-        deleting_newline = (cursor_pos > 0 and 
-                           cursor_pos <= len(plain_text) and 
+        deleting_newline = (cursor_pos > 0 and
+                           cursor_pos <= len(plain_text) and
                            plain_text[cursor_pos - 1] == '\n')
 
         self._edit_state.delete_before_cursor()
@@ -520,7 +520,7 @@ class GCView(wx.ScrolledWindow):
         # Check if we're deleting a newline (affects height)
         plain_text = self._edit_state.rich_text.to_plain_text()
         cursor_pos = self._edit_state.cursor_pos
-        deleting_newline = (cursor_pos < len(plain_text) and 
+        deleting_newline = (cursor_pos < len(plain_text) and
                            plain_text[cursor_pos] == '\n')
 
         self._edit_state.delete_after_cursor()
