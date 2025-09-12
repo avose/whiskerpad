@@ -145,7 +145,7 @@ class GCView(wx.ScrolledWindow):
         self.Bind(wx.EVT_MOUSEWHEEL, self._on_mousewheel)
         self.Bind(wx.EVT_RIGHT_DOWN, self._on_context_menu)
 
-        # track last client width for cheap resize detection
+        # Track last client width for cheap resize detection
         self._last_client_w = self.GetClientSize().width
 
         # Set up drag & drop for images
@@ -153,7 +153,7 @@ class GCView(wx.ScrolledWindow):
             drop_target = ImageDropTarget(self, on_image_drop)
             self.SetDropTarget(drop_target)
 
-        # build model
+        # Build model
         self.rebuild()
 
     def cleanup(self):
@@ -208,9 +208,7 @@ class GCView(wx.ScrolledWindow):
         # Set the new selection.
         self._sel = new_idx
         # Clear any saved image scale / pan state.
-        self._img_scale = 1.0
-        self._img_pan_x = 0.0
-        self._img_pan_y = 0.0
+        self.set_image_scale_pan(1.0, 0.0, 0.0)
         # Repaint to update highlight
         self.Refresh(False)
 
@@ -991,13 +989,22 @@ class GCView(wx.ScrolledWindow):
     # ------------ Image scale / pan (view only, not data) ------------
 
     def set_image_scale_pan(self, scale: float = None, pan_x: float = None, pan_y: float = None):
+        change = False
+
         if scale is not None:
+            scale = max(1.0, min(10.0, scale))
             self._img_scale = scale
+            change = True
+
         if pan_x is not None:
             self._img_pan_x = pan_x
+            change = True
         if pan_y is not None:
             self._img_pan_y = pan_y
-        self.Refresh(False)
+            change = True
+
+        if change:
+            self.Refresh(False)
 
     # ------------ Image zoom operations ------------
 

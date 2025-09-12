@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import wx
+from typing import Tuple, Optional
+
 from core.log import Log
 from ui.row import caret_hit, item_rect, has_children
-from ui.row_utils import date_gutter_hit, caret_hit, item_rect, has_children
+from ui.row_utils import date_gutter_hit, caret_hit, item_rect, has_children, is_image_row
 from ui.scroll import soft_ensure_visible
 from ui.notebook_text import rich_text_from_entry
 from ui.edit_state import find_word_boundaries
+
 
 # ---------------------------------------------------------------------------
 # row hit-testing helpers
@@ -281,14 +284,89 @@ def handle_left_up(view, evt: wx.MouseEvent) -> bool:
 
     return False
 
+def get_image_rect_near_point(
+        view, x: int, y: int
+) -> Optional[Tuple[int, int, int, int]]:
+    # Get scroll info
+    sx, sy = view.GetViewStart()
+    sy_px = sy * view.GetScrollPixelsPerUnit()[1]
+
+    # Get row index
+    row_idx, _ = view._index.find_row_at_y(sy_px + y)
+    if not (0 <= row_idx < len(view._rows)):
+        return None
+
+    # Check if this is an image row
+    if not is_image_row(view, row_idx):
+        return None
+
+    # Get the row rectangle
+    row_rect = item_rect(view, row_idx)
+    if row_rect.IsEmpty():
+        return None
+
+    # Get image dimensions from layout
+    row = view._rows[row_idx]
+    layout = view.cache.layout(row.entry_id) or {}
+    img_w = int(layout.get("img_sw") or 0)
+    img_h = int(layout.get("img_sh") or 0)
+    if img_w <= 0 or img_h <= 0:
+        return None
+
+    # Calculate image position within the row
+    x0 = row_rect.x + view._metrics.DATE_COL_W + view._metrics.PADDING + row.level * view._metrics.INDENT_W
+    y_text_top = row_rect.y + view._metrics.PADDING
+    img_x = x0 + view._metrics.GUTTER_W
+    img_y = y_text_top
+
+    # Convert to screen coordinates by subtracting scroll offset
+    img_y -= sy_px
+    return (img_x, img_y, img_w, img_h)
+
 def handle_mousewheel(view, evt: wx.MouseEvent) -> bool:
     """
     Scroll ~48 px per wheel notch (≈8-12 text lines, font-dependent).
     """
-    unit_x, unit_y = view.GetScrollPixelsPerUnit()
     rotation = evt.GetWheelRotation()
     delta = evt.GetWheelDelta() or 120
 
+    # Check for image zoom with control key down.
+    if evt.ControlDown():
+        # Compute scaling from wheel rotation delta
+        notches = rotation / float(delta)
+        zoom_step = 1.1
+        scale_factor = zoom_step if notches > 0 else 1.0 / zoom_step
+        old_scale = view._img_scale
+        new_scale = old_scale * (scale_factor ** abs(notches))
+        new_scale = max(1.0, min(10.0, new_scale))
+        f = new_scale / old_scale
+
+        # Get mouse position from the event
+        mx, my = evt.GetX(), evt.GetY()
+
+        # Get coordinates of the imge on the window
+        img_rect = get_image_rect_near_point(view, mx, my)
+        if not img_rect:
+            # Scale with no panning
+            view.set_image_scale_pan(scale=new_scale)
+            return True
+        img_x, img_y, img_w, img_h = img_rect
+
+        # Anchor is the same center used in drawing for Translate/Scale
+        ax = img_x + img_w / 2.0
+        ay = img_y + img_h / 2.0
+
+        # Pointer-anchored pan update for center-anchored scaling:
+        # p' = f*p + (1 - f)*(M - A)
+        new_pan_x = f * view._img_pan_x + (1.0 - f) * (mx - ax)
+        new_pan_y = f * view._img_pan_y + (1.0 - f) * (my - ay)
+
+        # Apply both scale and pan changes
+        view.set_image_scale_pan(scale=new_scale, pan_x=new_pan_x, pan_y=new_pan_y)
+        return True
+
+    # Regular mouse wheen event.
+    unit_x, unit_y = view.GetScrollPixelsPerUnit()
     notches = rotation / float(delta)
     pixels = -int(notches * 48)
 

@@ -179,29 +179,32 @@ def handle_key_event(view, evt: wx.KeyEvent) -> bool:
 
 def handle_edit_mode_keys(view, evt: wx.KeyEvent) -> bool:
     """Handle all keyboard input during text editing."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == wx.WXK_ESCAPE:
+    if key_code == wx.WXK_ESCAPE:
         return _handle_escape_key(view)
 
-    if code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+    if key_code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
         return _handle_enter_key(view, evt)
 
-    if code == wx.WXK_TAB:
+    if key_code == wx.WXK_TAB:
         return _handle_tab_key(view, evt)
 
-    if code in (wx.WXK_LEFT, wx.WXK_RIGHT):
+    if key_code in (wx.WXK_LEFT, wx.WXK_RIGHT):
         return _handle_cursor_keys(view, evt)
 
-    if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP, wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+    if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP, wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         return _handle_vertical_keys(view, evt)
 
-    if code in (wx.WXK_HOME, wx.WXK_END):
+    if key_code in (wx.WXK_HOME, wx.WXK_END):
         return _handle_home_end_keys(view, evt)
 
-    if code in (wx.WXK_BACK, wx.WXK_DELETE):
+    if key_code in (wx.WXK_BACK, wx.WXK_DELETE):
         return _handle_delete_keys(view, evt)
 
+    if evt.ControlDown() and key_code == ord('A'):
+        return _handle_select_all(view, evt)
+    
     return _handle_text_input(view, evt)
 
 def _handle_escape_key(view) -> bool:
@@ -231,9 +234,9 @@ def _handle_tab_key(view, evt) -> bool:
 
 def _handle_cursor_keys(view, evt) -> bool:
     """Handle left/right arrow keys."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == wx.WXK_LEFT:
+    if key_code == wx.WXK_LEFT:
         Log.debug(
             f"_handle_cursor_keys: LEFT arrow pressed, "
             f"cursor_pos={view._edit_state.cursor_pos}",
@@ -251,7 +254,7 @@ def _handle_cursor_keys(view, evt) -> bool:
         Log.debug(f"_handle_cursor_keys: new cursor_pos={view._edit_state.cursor_pos}", 75)
         return True
 
-    elif code == wx.WXK_RIGHT:
+    elif key_code == wx.WXK_RIGHT:
         Log.debug(
             f"_handle_cursor_keys: RIGHT arrow pressed, "
             f"cursor_pos={view._edit_state.cursor_pos}",
@@ -279,17 +282,17 @@ def _handle_vertical_keys(view, evt) -> bool:
         return False
 
     entry_id = view._edit_state.entry_id
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
     # Check if this is single-line text using cached data
     if _is_single_line_text(view, entry_id):
-        return _handle_single_line_arrow_navigation(view, code)
+        return _handle_single_line_arrow_navigation(view, key_code)
 
     # Multi-line text - check if we're at boundary lines
     current_line, current_col = _get_line_col_from_position(view, entry_id, view._edit_state.cursor_pos)
     rich_lines = _get_line_info_from_cache(view, entry_id)
 
-    if code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
+    if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
         if current_line == 0:
             return _move_to_previous_row(view)
         else:
@@ -298,7 +301,7 @@ def _handle_vertical_keys(view, evt) -> bool:
                 _update_cursor_position(view, new_pos)
             return True
 
-    elif code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
+    elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
         if current_line >= len(rich_lines) - 1:
             return _move_to_next_row(view)
         else:
@@ -311,9 +314,9 @@ def _handle_vertical_keys(view, evt) -> bool:
 
 def _handle_home_end_keys(view, evt) -> bool:
     """Handle Home/End keys."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == wx.WXK_HOME:
+    if key_code == wx.WXK_HOME:
         if evt.ShiftDown():
             view._edit_state.extend_selection_to(0)
             view._edit_state.cursor_pos = 0
@@ -324,7 +327,7 @@ def _handle_home_end_keys(view, evt) -> bool:
         view._refresh_edit_row()
         return True
 
-    elif code == wx.WXK_END:
+    elif key_code == wx.WXK_END:
         if view._edit_state.rich_text:
             end_pos = view._edit_state.rich_text.char_count()
             if evt.ShiftDown():
@@ -341,16 +344,16 @@ def _handle_home_end_keys(view, evt) -> bool:
 
 def _handle_delete_keys(view, evt) -> bool:
     """Handle Backspace/Delete keys."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == wx.WXK_BACK:
+    if key_code == wx.WXK_BACK:
         if view._edit_state.has_selection():
             view.delete_selected_text()
         else:
             view.delete_char_before_cursor()
         return True
 
-    elif code == wx.WXK_DELETE:
+    elif key_code == wx.WXK_DELETE:
         if view._edit_state.has_selection():
             view.delete_selected_text()
         else:
@@ -361,15 +364,32 @@ def _handle_delete_keys(view, evt) -> bool:
 
 def _handle_clipboard_keys(view, evt) -> bool:
     """Handle Ctrl+C/V/X clipboard operations in both edit and navigation modes."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == ord('C'):
+    if key_code == ord('C'):
         view.copy()
-    elif code == ord('V'):
+    elif key_code == ord('V'):
         view.paste()
-    elif code == ord('X'):
+    elif key_code == ord('X'):
         view.cut()
 
+    return True
+
+def _handle_select_all(view, evt) -> bool:
+    """Select all text in the row."""
+    # Clear selection, move cursor to first character.
+    view._edit_state.clear_selection()
+    view._edit_state.cursor_pos = 0
+
+    # Extend selection to last character.
+    max_pos = view._edit_state.rich_text.char_count() if view._edit_state.rich_text else 0
+    view._edit_state.extend_selection_to(max_pos)
+
+    # Update colors / format from text at cursor position.
+    view._edit_state.update_format_from_cursor()
+
+    # Refresh the edit row.
+    view._refresh_edit_row()
     return True
 
 def _handle_text_input(view, evt) -> bool:
@@ -412,21 +432,21 @@ def _handle_text_input(view, evt) -> bool:
 
 def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
     """Handle keyboard input when not in edit mode (tree navigation)."""
-    code = evt.GetKeyCode()
+    key_code = evt.GetKeyCode()
 
-    if code == wx.WXK_ESCAPE:
+    if key_code == wx.WXK_ESCAPE:
         return _handle_nav_escape_key(view)
 
-    if code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+    if key_code in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
         return _handle_nav_enter_key(view)
 
     if not view._rows:
         return False
 
-    if code == wx.WXK_TAB:
+    if key_code == wx.WXK_TAB:
         return _handle_nav_tab_keys(view, evt)
 
-    if code in (
+    if key_code in (
             wx.WXK_UP,
             wx.WXK_NUMPAD_UP,
             wx.WXK_DOWN,
@@ -438,33 +458,44 @@ def handle_navigation_keys(view, evt: wx.KeyEvent) -> bool:
     ):
         return _handle_nav_arrow_keys(view, evt)
 
-    if code in (wx.WXK_PAGEUP, wx.WXK_PAGEDOWN):
+    if key_code in (wx.WXK_PAGEUP, wx.WXK_PAGEDOWN):
         return _handle_nav_page_keys(view, evt)
 
-    if code in (wx.WXK_HOME, wx.WXK_END):
+    if key_code in (wx.WXK_HOME, wx.WXK_END):
         return _handle_nav_home_end_keys(view, evt)
 
-    if code == wx.WXK_SPACE:
+    if key_code == wx.WXK_SPACE:
         return _handle_nav_space_key(view)
 
-    if code in (wx.WXK_BACK, wx.WXK_DELETE):
+    if key_code in (wx.WXK_BACK, wx.WXK_DELETE):
         return _handle_nav_delete_keys(view, evt)
 
     return False
 
 def _handle_nav_escape_key(view) -> bool:
-    """Handle Escape key in navigation mode - clear cut state and bookmark source."""
+    """Handle Escape key in navigation mode"""
     cleared_something = False
 
+    # Clear cut state
     if view._cut_entry_id:
         view._cut_entry_id = None
         view.Refresh()
         view.SetStatusText("Cut selection cleared")
         cleared_something = True
 
+    # Clear bookmark source
     if view._bookmark_source_id:
         view.clear_bookmark_source()
         view.SetStatusText("Bookmark source cleared")
+        cleared_something = True
+
+    # Clear image scale / pan
+    if any((
+        view._img_scale != 1.0,
+        view._img_pan_x != 0.0,
+        view._img_pan_y != 0.0,
+    )):
+        view.set_image_scale_pan(1.0, 0.0, 0.0)
         cleared_something = True
 
     return cleared_something
@@ -508,11 +539,11 @@ def _handle_nav_arrow_keys(view, evt) -> bool:
     current_layout = view.cache.layout(current_row.entry_id) or {}
     if evt.ControlDown() and current_layout.get("is_img"):
         if key_code in (wx.WXK_UP, wx.WXK_NUMPAD_UP):
-            scale = view._img_scale * 1.5
+            scale = view._img_scale * 1.25
             view.set_image_scale_pan(scale=scale)
             return True
         elif key_code in (wx.WXK_DOWN, wx.WXK_NUMPAD_DOWN):
-            scale = view._img_scale * (1.0 / 1.5)
+            scale = view._img_scale * (1.0 / 1.25)
             view.set_image_scale_pan(scale=scale)
             return True
 

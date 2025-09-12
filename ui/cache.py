@@ -13,6 +13,7 @@ from core.tree import (
     cancel_entry_edit,
     set_entry_edit_rich_text,
 )
+from ui.layout import client_text_width, ensure_wrap_cache
 
 __all__ = ["NotebookCache"]
 
@@ -75,7 +76,6 @@ class NotebookCache:
 
     def char_to_pixel(self, row: Row, char_pos: int, text_area_x: int, text_area_y: int) -> Tuple[int, int]:
         """Convert character position to pixel coordinates using cached layout data."""
-        from ui.layout import client_text_width, ensure_wrap_cache
 
         # Ensure we have valid layout data
         width = client_text_width(self.view, row.level)
@@ -145,7 +145,6 @@ class NotebookCache:
 
     def pixel_to_char(self, row: Row, click_x: int, click_y: int, text_area_x: int, text_area_y: int) -> int:
         """Convert pixel coordinates to character position using cached layout data."""
-        from ui.layout import client_text_width, ensure_wrap_cache
         
         # Ensure we have valid layout data
         width = client_text_width(self.view, row.level)

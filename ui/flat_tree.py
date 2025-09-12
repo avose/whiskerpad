@@ -369,7 +369,7 @@ class FlatTree:
             self.view.rebuild()
 
         # 4. Navigate to the target entry
-        success = self.view.select_entry(entry_id, ensure_visible=True)
+        return self.view.select_entry(entry_id, ensure_visible=True)
     
     # ------------------------------------------------------------------ #
     # Helper methods
